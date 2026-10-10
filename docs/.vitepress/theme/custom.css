@@ -72,6 +72,7 @@ html {
 }
 
 .VPDoc .content-container,
+.VPHome,
 .NotFound {
   animation: docs-page-enter 260ms var(--docs-ease-out);
 }
@@ -151,6 +152,7 @@ html {
   html { scroll-behavior: auto; }
 
   .VPDoc .content-container,
+  .VPHome,
   .NotFound {
     animation: none !important;
   }

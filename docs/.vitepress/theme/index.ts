@@ -5,10 +5,10 @@ import { h } from 'vue'
 import ReleaseInfo from './ReleaseInfo.vue'
 import './custom.css'
 
-/** 页面切换时淡入正文；页内锚点跳转保持原有滚动行为。 */
+/** 页面切换时淡入首页或正文；页内锚点跳转保持原有滚动行为。 */
 function animatePage() {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-  document.querySelector<HTMLElement>('.VPDoc .content-container, .NotFound')?.animate(
+  document.querySelector<HTMLElement>('.VPDoc .content-container, .VPHome, .NotFound')?.animate(
     [{ opacity: 0.72 }, { opacity: 1 }],
     { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
   )
