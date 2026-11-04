@@ -890,8 +890,9 @@ class EntityDataLoader:
         version: str,
         *,
         ordinary_names: Mapping[str, str] | None = None,
+        allow_tasks: bool = True,
     ) -> dict | None:
-        """把已持久化 resource-pack artifact 投影为特殊目录行。"""
+        """投影已有资源包；只读浏览时跳过任务所需的来源快照校验。"""
         metadata = payload.get("resourcePack")
         if not isinstance(metadata, dict):
             return None
@@ -903,7 +904,7 @@ class EntityDataLoader:
 
         source = metadata.get("source")
         wad_ref = None
-        if isinstance(source, dict):
+        if allow_tasks and isinstance(source, dict):
             try:
                 wad_ref = ResourcePackWadRef(
                     identity=str(source.get("wad", wad)),
@@ -950,7 +951,7 @@ class EntityDataLoader:
                 cost_text = (
                     f"\n扫描成本: candidate {candidates or 0}，payload {reads or 0}，耗时 {elapsed_seconds:.1f}s"
                 )
-        selection_notice = "\n选择快照无效，请重新选择并扫描该 WAD。" if wad_ref is None else ""
+        selection_notice = "\n选择快照无效，请重新选择并扫描该 WAD。" if allow_tasks and wad_ref is None else ""
 
         return {
             "id": key,
@@ -986,7 +987,7 @@ class EntityDataLoader:
             "entity_type": "resource_packs",
             "mapping_file": mapping_file,
             "resource_pack_wad": wad_ref,
-            "selectable": wad_ref is not None,
+            "selectable": not allow_tasks or wad_ref is not None,
         }
 
     def load_resource_pack_rows(
@@ -1200,7 +1201,7 @@ class EntityDataLoader:
             and mapping_data.get("skinAudioVersion") != SKIN_AUDIO_VERSION
         ):
             entity = self._load_preview_entity(entity_type, str(entity_id))
-            if entity is not None:
+            if entity is not None and entity.resource_banks:
                 layout = SkinAudio(entity.resource_banks, entity.skin_parents)
                 mapping_data = {**mapping_data, "skins": layout.mapping_differences(mapping_data.get("skins", {}))}
                 mapping_data["sharedAudio"] = layout.shared_payload()
@@ -1268,6 +1269,20 @@ class EntityDataLoader:
         if entity_data is None:
             return ()
         return resolve_audio_refs(self.ctx, entity_data, self.data_reader.version, paths)
+
+    def build_audio_resolver(
+        self, entity_type: GuiEntityType, entity_id: str, *, roots: tuple[Path, ...]
+    ) -> Callable[[str], AudioRef | None]:
+        """为一次预览固定实体身份，逐项解析事件时复用元数据投影。"""
+        entity = self._load_preview_entity(entity_type, entity_id, allow_unprepared=True)
+
+        def resolve(path: str) -> AudioRef | None:
+            if entity is None:
+                return None
+            refs = resolve_audio_refs(self.ctx, entity, self.data_reader.version, (path,), roots=roots)
+            return refs[0] if refs else None
+
+        return resolve
 
     def load_audio_roots(
         self,

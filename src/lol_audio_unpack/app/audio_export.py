@@ -2,11 +2,42 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .audio_scope import AudioScope
+from .outputs import output_path
 from .types import WavOutputOptions
+
+
+def freeze_unlisted_export(request: AudioExportRequest, files: tuple[Path, ...] | None) -> AudioExportRequest:
+    """为没有成功清单的本地音频冻结已索引文件，避免目录导出误取空清单。
+
+    Args:
+        request: 当前浏览版本的导出快照。
+        files: 当前实体已完成的音频索引；未完成时为 None。
+
+    Raises:
+        ValueError: 无清单的目录范围尚未完成索引。
+    """
+    if request.library_root is None or not any(target.scope.directories for target in request.targets):
+        return request
+    kind = {"champions": "champion", "maps": "map", "resource_packs": "resource_pack"}[request.entity_type]
+    manifest = output_path(request.library_root, request.version, request.region, kind, request.entity_id)
+    if manifest.is_file():
+        return request
+    if files is None:
+        raise ValueError("此版本缺少音频清单，请等待全部音频索引完成后再导出。")
+    targets = []
+    for target in request.targets:
+        scope = target.scope
+        selected = tuple(
+            path.relative_to(scope.root).as_posix()
+            for path in files
+            if path.is_relative_to(scope.root) and scope.contains(path.relative_to(scope.root).as_posix())
+        )
+        targets.append(replace(target, scope=replace(scope, directories=(), files=(*scope.files, *selected))))
+    return replace(request, targets=tuple(targets))
 
 
 @dataclass(frozen=True, slots=True)

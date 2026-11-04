@@ -9,7 +9,7 @@ from typing import Any
 
 from loguru import logger
 
-from lol_audio_unpack.app.artifacts import AudioRef, resolve_audio_refs
+from lol_audio_unpack.app.artifacts import AudioRef
 from lol_audio_unpack.gui.service.data_loader import EntityDataLoader
 
 EVENT_PREVIEW_MODE = "audio"
@@ -101,14 +101,7 @@ class OverviewPreviewController:
         available_audio_ids = set()
         resolve_ref = None
         if mapping_data is not None:
-            entity = loader._load_preview_entity(entity_type, entity_id, allow_unprepared=True)
-            if entity is not None:
-
-                def resolve_ref(path):
-                    refs = resolve_audio_refs(
-                        loader.ctx, entity, loader.data_reader.version, (path,), roots=audio_roots
-                    )
-                    return refs[0] if refs else None
+            resolve_ref = loader.build_audio_resolver(entity_type, entity_id, roots=audio_roots)
 
         group_label_map = self._build_preview_group_label_map(
             entity_type=entity_type,
@@ -172,7 +165,7 @@ class OverviewPreviewController:
             if not skin_id:
                 continue
 
-            skin_name = self._resolve_localized_name(skin, names_key="skinNames")
+            skin_name = self._resolve_localized_name(skin, names_key="skinNames", region=loader.ctx.game_region)
             if skin_name:
                 label_map[skin_id] = skin_name
 
@@ -182,7 +175,9 @@ class OverviewPreviewController:
                 chroma_id = str(chroma.get("id") or "").strip()
                 if not chroma_id:
                     continue
-                chroma_name = self._resolve_localized_name(chroma, names_key="chromaNames")
+                chroma_name = self._resolve_localized_name(
+                    chroma, names_key="chromaNames", region=loader.ctx.game_region
+                )
                 if chroma_name:
                     label_map[chroma_id] = chroma_name
 
@@ -229,13 +224,13 @@ class OverviewPreviewController:
         )
 
     @staticmethod
-    def _resolve_localized_name(payload: dict[str, Any], *, names_key: str) -> str | None:
+    def _resolve_localized_name(payload: dict[str, Any], *, names_key: str, region: str) -> str | None:
         """从皮肤或炫彩结构中提取本地化展示名。"""
         names = payload.get(names_key)
         if isinstance(names, dict):
-            zh_name = str(names.get("zh_CN") or "").strip()
-            if zh_name:
-                return zh_name
+            localized_name = str(names.get(region) or "").strip()
+            if localized_name:
+                return localized_name
 
             for key in ("default", "en_US"):
                 fallback_name = str(names.get(key) or "").strip()
