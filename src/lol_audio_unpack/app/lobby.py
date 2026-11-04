@@ -49,6 +49,8 @@ def repair_lobby(ctx: AppContext) -> None:
                             missing += 1
                             continue
                         writer.link_file(source, path.relative_to(root).as_posix())
+                        if source.stem != key:
+                            logger.debug("已有英雄大厅音频复用原英雄：{} → {}，{}", key, source.stem, category)
                         added += 1
                     paths.append(path)
                 if paths:

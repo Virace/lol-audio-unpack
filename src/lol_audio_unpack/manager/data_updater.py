@@ -13,8 +13,9 @@ from league_tools.formats import WAD
 from loguru import logger
 
 from lol_audio_unpack.app.game_version import resolve_game_version
+from lol_audio_unpack.app.special_content import get_prime_champion_id
 from lol_audio_unpack.manager.files import copy_file_atomic, needs_update, read_data, write_data
-from lol_audio_unpack.manager.lobby import LOBBY_FILES, find_lobby_source
+from lol_audio_unpack.manager.lobby import LOBBY_FILES, find_lobby_file
 from lol_audio_unpack.manager.utils import build_metadata_payload
 from lol_audio_unpack.utils.atomic import replace_file
 from lol_audio_unpack.utils.common import format_region, load_json
@@ -257,39 +258,64 @@ class DataUpdater:
                 logger.warning(f"开发模式，临时目录未删除: {run_temp_path}")
 
     def ensure_lobby_audio(self, champion_ids: Iterable[str | int]) -> None:
-        """只补齐指定英雄缺少的大厅文件，独立于共享元数据是否已更新。"""
+        """补齐指定英雄可用的大厅源文件，自身缺失时复用关联原英雄。"""
+        champions = read_data(self.data_file_base).get("champions", {})
         pending = {}
         for champion_id in champion_ids:
+            key = str(champion_id)
+            prime_id = get_prime_champion_id(champions.get(key, {}))
             for category in LOBBY_FILES:
-                if find_lobby_source(self.version_manifest_path, self.ctx.game_region, str(champion_id), category):
+                if find_lobby_file(self.version_manifest_path, self.ctx.game_region, key, category):
                     continue
                 region = self.ctx.game_region
                 if category == "champion-sfx-audios" or region.lower() in {"default", "en_us"}:
                     region = "default"
-                pending.setdefault(region, []).append((category, str(champion_id)))
+                pending.setdefault(region, []).append((category, key, prime_id))
         if not pending:
             return
-        logger.info("开始补齐大厅音频：{}，{} 个目标文件", self.version, sum(map(len, pending.values())))
         try:
+            planned = {}
             for region, entries in pending.items():
-                paths = [self._build_rcp_v1_path(region, f"{category}/{key}.ogg") for category, key in entries]
-
-                for wad in self._resolve_wad_files(region, format_region(region)):
-                    for path, data in zip(paths, WAD(wad).extract(paths, raw=True), strict=True):
-                        if data is None:
+                wads = {path: WAD(path) for path in self._resolve_wad_files(region, format_region(region))}
+                sources = {entry.path_hash: path for path, wad in wads.items() for entry in wad.files}
+                missing = {}
+                for category, key, prime_id in entries:
+                    path = self._build_rcp_v1_path(region, f"{category}/{key}.ogg")
+                    wad_file = sources.get(WAD.get_hash(path))
+                    if wad_file is None and prime_id is not None:
+                        if find_lobby_file(self.version_manifest_path, region, str(prime_id), category):
                             continue
-                        category, filename = path.rsplit("/", 2)[-2:]
-                        target = self.version_manifest_path / "lobby" / region / category / filename
-                        replace_file(target, lambda temp, payload=data: temp.write_bytes(payload), write_stage="lobby")
-            missing = sum(
-                find_lobby_source(self.version_manifest_path, self.ctx.game_region, key, category) is None
-                for entries in pending.values()
-                for category, key in entries
-            )
-            if missing:
-                logger.warning("大厅音频补齐结束：源资源中仍缺少 {} 个目标文件", missing)
+                        path = self._build_rcp_v1_path(region, f"{category}/{prime_id}.ogg")
+                        wad_file = sources.get(WAD.get_hash(path))
+                    if wad_file is None:
+                        missing.setdefault(category, []).append(f"{key} → {prime_id}" if prime_id is not None else key)
+                        continue
+                    # 缓存按实际源 ID 保存，避免共享文件占用以后新增的独立资源位置。
+                    planned.setdefault((region, wad_file, wads[wad_file]), set()).add(path)
+                for category, keys in missing.items():
+                    logger.debug("大厅源资源未找到：语言={}，分类={}，英雄={}", region, category, ",".join(keys))
+            if not planned:
+                return
+
+            total = sum(map(len, planned.values()))
+            logger.info("开始补齐大厅音频：{}，{} 个源文件", self.version, total)
+            saved = 0
+            for (region, wad_file, wad), candidates in planned.items():
+                paths = sorted(candidates)
+                bundle = wad_file.relative_to(self.game_path)
+                logger.debug("提取大厅音频：资源包={}，源文件={}", bundle, len(paths))
+                for path, data in zip(paths, wad.extract(paths, raw=True), strict=True):
+                    if data is None:
+                        logger.debug("大厅音频条目提取失败：资源包={}，条目={}", bundle, path)
+                        continue
+                    category, filename = path.rsplit("/", 2)[-2:]
+                    target = self.version_manifest_path / "lobby" / region / category / filename
+                    replace_file(target, lambda temp, payload=data: temp.write_bytes(payload), write_stage="lobby")
+                    saved += 1
+            if saved == total:
+                logger.info("大厅音频补齐完成：{} 个源文件", saved)
             else:
-                logger.success("大厅音频补齐完成：{} 个文件", sum(map(len, pending.values())))
+                logger.warning("大厅音频补齐结束：新增 {}，提取失败 {}", saved, total - saved)
         except Exception:
             logger.exception("大厅音频补齐失败：{}", self.version)
             raise
@@ -488,6 +514,8 @@ class DataUpdater:
                 "skins": processed_skins,
                 "wad": self._build_champion_wad_info(alias),
             }
+            if default_details.get("relatedPrimeItemId") is not None:
+                final_champions[champ_id]["relatedPrimeItemId"] = default_details["relatedPrimeItemId"]
 
         final_result = build_metadata_payload(
             self.version, [lang for lang in self.process_languages if lang != "default"]
