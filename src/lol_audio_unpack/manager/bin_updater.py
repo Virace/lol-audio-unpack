@@ -134,9 +134,8 @@ class BinUpdater:
                 f"BinUpdater 更新完成（{mode}）：{summary}，部分成功 {partial_count} 个，失败 {failed_count} 个"
             )
             return
-        logger.success(f"BinUpdater 更新完成（{mode}）：{summary}")
 
-    @performance_monitor(level="INFO")
+    @performance_monitor(level="TRACE")
     def update(
         self,
         target: str = "all",
@@ -172,10 +171,6 @@ class BinUpdater:
             filtered_data = self._filter_data_by_ids(data, champion_ids, map_ids)
             champion_count = len(filtered_data.get("champions", {}))
             map_count = len(filtered_data.get("maps", {}))
-            logger.info(
-                f"开始更新 BIN 数据（精确模式）：英雄 {champion_count} 个，地图 {map_count} 个，"
-                f"事件处理={'开启' if self.process_events else '关闭'}"
-            )
             if champion_ids and filtered_data.get("champions"):
                 results.extend(self._champion_processor._update_champions(filtered_data))
             if map_ids and filtered_data.get("maps"):
@@ -192,12 +187,8 @@ class BinUpdater:
             champion_count = len(batch_data.get("champions", {})) if target in ["skin", "all"] else 0
             hidden_count = len(data.get("champions", {})) - champion_count if target in ["skin", "all"] else 0
             map_count = len(data.get("maps", {})) if target in ["map", "all"] else 0
-            logger.info(
-                f"开始更新 BIN 数据（批量模式）：target={target}，英雄 {champion_count} 个，地图 {map_count} 个，"
-                f"事件处理={'开启' if self.process_events else '关闭'}"
-            )
             if hidden_count:
-                logger.info(f"默认批量更新已排除 {hidden_count} 个隐藏英雄实体")
+                logger.debug(f"默认批量更新已排除 {hidden_count} 个隐藏英雄实体")
             if target in ["skin", "all"]:
                 results.extend(self._champion_processor._update_champions(batch_data))
             if target in ["map", "all"]:

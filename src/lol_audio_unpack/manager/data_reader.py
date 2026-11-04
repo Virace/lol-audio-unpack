@@ -186,7 +186,7 @@ class DataReader:
         languages_set.add("default")
         return list(languages_set)
 
-    @performance_monitor(level="DEBUG")
+    @performance_monitor(level="TRACE")
     def get_champion_banks(self, champion_id: int, *, require_bindings: bool = False) -> dict | None:
         """
         读取指定英雄的banks数据
@@ -218,7 +218,7 @@ class DataReader:
         payload = self.get_champion_banks(champion_id, require_bindings=True)
         return ResourceBindings.from_payload(payload) if payload else None
 
-    @performance_monitor(level="DEBUG")
+    @performance_monitor(level="TRACE")
     def write_unknown_categories(self) -> None:
         """将本次运行中收集到的所有未知分类写入到文件中"""
         if self.read_only or not self.unknown_categories:
@@ -241,7 +241,7 @@ class DataReader:
         except Exception as e:
             logger.opt(exception=True).error(f"写入未知分类文件时出错: {e}")
 
-    @performance_monitor(level="DEBUG")
+    @performance_monitor(level="TRACE")
     def get_champion_events(self, champion_id: int) -> dict | None:
         """
         读取指定英雄的events数据
@@ -265,7 +265,7 @@ class DataReader:
 
         return events_data
 
-    @performance_monitor(level="DEBUG")
+    @performance_monitor(level="TRACE")
     def get_map_banks(self, map_id: int, *, require_bindings: bool = False) -> dict | None:
         """
         读取指定地图的banks数据
@@ -297,7 +297,7 @@ class DataReader:
         payload = self.get_map_banks(map_id, require_bindings=True)
         return ResourceBindings.from_payload(payload) if payload else None
 
-    @performance_monitor(level="DEBUG")
+    @performance_monitor(level="TRACE")
     def get_resource_pack_banks(self, key: str, *, require_bindings: bool = False) -> dict | None:
         """读取指定 resource-pack 的 banks artifact。
 
@@ -370,7 +370,7 @@ class DataReader:
             artifacts_by_key.setdefault(key, payload)
         return [artifacts_by_key[key] for key in sorted(artifacts_by_key)]
 
-    @performance_monitor(level="DEBUG")
+    @performance_monitor(level="TRACE")
     def get_resource_pack_events(self, key: str) -> dict | None:
         """读取并缓存指定 resource-pack 的 events artifact。
 
@@ -402,7 +402,7 @@ class DataReader:
             return
         raise ResourceSchemaMismatchError(f"{label} 的 banks artifact 缺少 resource schema v2，请先重新运行 update。")
 
-    @performance_monitor(level="DEBUG")
+    @performance_monitor(level="TRACE")
     def get_map_events(self, map_id: int) -> dict | None:
         """读取并缓存指定地图的 events 数据。
 

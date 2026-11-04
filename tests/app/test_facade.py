@@ -484,9 +484,7 @@ def test_mapping_runs_explicit_champions_and_maps_without_dropping_either_target
     app = LolAudioUnpackApp(ctx)
     calls: list[tuple[str, list[int]]] = []
     reader = _catalog_reader()
-    backend = "native"
     monkeypatch.setattr(app, "_get_reader", lambda: reader)
-    monkeypatch.setattr(app, "_describe_mapping_backend", lambda: backend)
     monkeypatch.setattr(
         facade_module,
         "build_champions",
@@ -707,7 +705,6 @@ def test_mapping_resource_pack_only_uses_special_consumer_without_all_fallback(t
     app = LolAudioUnpackApp(ctx)
     calls: list[list[str]] = []
     monkeypatch.setattr(app, "_get_reader", _catalog_reader)
-    monkeypatch.setattr(app, "_describe_mapping_backend", lambda: "native")
     monkeypatch.setattr(
         facade_module,
         "build_resource_packs",
@@ -731,7 +728,6 @@ def test_mapping_dispatches_champion_map_and_resource_pack_together(tmp_path, mo
     app = LolAudioUnpackApp(ctx)
     calls: list[tuple[str, list[object]]] = []
     monkeypatch.setattr(app, "_get_reader", _catalog_reader)
-    monkeypatch.setattr(app, "_describe_mapping_backend", lambda: "native")
     monkeypatch.setattr(
         facade_module,
         "build_champions",

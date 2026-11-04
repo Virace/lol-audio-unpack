@@ -22,7 +22,6 @@ from lol_audio_unpack.utils.runtime_paths import (
 
 from .local_source import validate_local_source
 from .migration import migrate_library
-from .source_info import log_source_info
 from .types import (
     AppConfig,
     AppContext,
@@ -86,13 +85,11 @@ def _build_settings(
                 logger.warning(f"忽略未知配置项: {key}")
                 continue
             if value is None:
-                logger.debug(f"忽略空的配置项: {key}=None")
                 continue
             if isinstance(value, str) and not value.strip():
                 if key in (SettingKey.EXCLUDE_TYPE, SettingKey.GAME_REGION):
                     merged[key] = ""
                     continue
-                logger.debug(f"忽略空白配置项: {key}")
                 continue
             merged[key] = value
 
@@ -203,7 +200,6 @@ def create_app_context(  # noqa: PLR0913
     app_config = _build_config(settings=raw_settings, dev_mode=dev_mode)
     if not app_config.game_region and not allow_empty_language:
         raise AppContextValidationError("请选择游戏资源语言")
-    log_source_info(app_config.game_path, app_config.game_region)
     # 旧文件迁移不消费游戏源；没有旧输出时不创建目录。新任务仍须通过下方输入预检。
     migrate_library(
         app_config.output_path, region=app_config.game_region or "en_US", progress_callback=progress_callback

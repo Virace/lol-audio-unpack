@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 from queue import Empty
 
-from lol_audio_unpack.app.results import RunResult, StageResult
+from loguru import logger
+
+from lol_audio_unpack.app.results import ResultStatus, RunResult, StageResult
 from lol_audio_unpack.gui.service.execution_process_worker import ExecutionProcessWorker
 from lol_audio_unpack.gui.task_models import (
+    AppContextInputSnapshot,
     ExecutionTaskDraft,
+    ExecutionTaskParamsSnapshot,
     ExecutionTaskProgress,
     ExecutionTaskResult,
     QueuedExecutionTask,
 )
+from lol_audio_unpack.utils.logging import LoggingConfiguration, log_paths
 
 
 class _FakeQueue:
@@ -176,3 +182,59 @@ def test_worker_exit_without_terminal_event_reports_unknown_scope(qtbot) -> None
     assert len(failures) == 1 and "完成范围未知" in failures[0]
     worker._pump_events()
     assert len(failures) == 1
+
+
+def test_spawn_task_logs_reach_parent_before_result(qtbot, tmp_path, monkeypatch) -> None:
+    """真实 spawn 中的诊断和异常须保留来源，并接受各输出端等级过滤。"""
+    task = replace(
+        _build_task(),
+        draft=ExecutionTaskDraft(
+            "test",
+            "invalid source",
+            context_input=AppContextInputSnapshot(
+                (
+                    ("GAME_PATH", str(tmp_path / "missing-game")),
+                    ("OUTPUT_PATH", str(tmp_path / "output")),
+                    ("GAME_REGION", "en_US"),
+                )
+            ),
+            task_params=ExecutionTaskParamsSnapshot(run_extract=True, run_mapping=False),
+        ),
+    )
+    monkeypatch.setattr(LoggingConfiguration, "log_level", logger.level("DEBUG").no)
+    monkeypatch.setattr(LoggingConfiguration, "paths", ())
+    monkeypatch.setattr(LoggingConfiguration, "path_patterns", ())
+    logger.enable("lol_audio_unpack")
+    log_paths(tmp_path / "missing-game", tmp_path / "output")
+    records = []
+    visible = []
+    debug_sink = logger.add(lambda message: records.append(message.record.copy()), level="DEBUG")
+    info_sink = logger.add(lambda message: visible.append(message.record.copy()), level="INFO")
+    worker = ExecutionProcessWorker(task)
+    results = []
+    failures = []
+    logs_at_result = []
+    worker.signals.finished.connect(lambda result: (results.append(result), logs_at_result.append(len(records))))
+    worker.signals.failed.connect(failures.append)
+    try:
+        worker.start()
+        qtbot.waitUntil(lambda: bool(results or failures), timeout=20000)
+        assert worker.wait(5000)
+    finally:
+        if worker.isRunning():
+            worker.terminate()
+        logger.remove(debug_sink)
+        logger.remove(info_sink)
+
+    assert not failures
+    assert results[0].run_result.status is ResultStatus.FAILED
+    child = [record for record in records if record["process"].id != os.getpid()]
+    assert child and len(child) == len(records) == logs_at_result[0]
+    assert len({record["message"] for record in child}) == len(child)
+    assert any(record["level"].name == "DEBUG" for record in child)
+    assert any(record["level"].name == "ERROR" for record in child)
+    assert all(record["level"].no >= logger.level("INFO").no for record in visible)
+    assert all(record["extra"]["operation_id"] == task.draft.operation_id for record in child)
+    assert all(record["function"] != "_pump_events" for record in child)
+    assert all(str(tmp_path / "missing-game") not in record["message"] for record in child)
+    assert any("AppContextValidationError" in record["message"] for record in child)

@@ -132,7 +132,6 @@ def execute_tasks(  # noqa: PLR0913
         按输入任务顺序保存实体事实的解包阶段结果。
     """
     if not tasks:
-        logger.info("没有任何任务需要执行")
         return StageResult.from_entities("extract", (), note="没有任何任务需要执行")
 
     if error := _validate_tasks(tasks):
@@ -400,7 +399,7 @@ def execute_tasks(  # noqa: PLR0913
     elif result.status is ResultStatus.PARTIAL:
         logger.warning(summary_message)
     else:
-        logger.success(summary_message)
+        logger.debug(summary_message)
 
     return result
 

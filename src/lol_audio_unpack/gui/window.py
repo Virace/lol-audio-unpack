@@ -68,7 +68,7 @@ from lol_audio_unpack.gui.controllers.window_shell import (
 )
 from lol_audio_unpack.gui.resources import assets
 from lol_audio_unpack.gui.service.data_loader import EntityDataLoader
-from lol_audio_unpack.gui.service.source_context import create_source_context
+from lol_audio_unpack.gui.service.source_context import SourceContextBuilder
 from lol_audio_unpack.gui.service.worker import SharedDataScanWorker
 from lol_audio_unpack.gui.shared_data import (
     SharedDataPreparationResult,
@@ -114,7 +114,7 @@ def _prepare_shared_entity_data(  # noqa: PLR0913
     app_context = create_app_context(settings=dict(shared_settings))
     app = LolAudioUnpackApp(app_context)
     if not prepare_resources:
-        logger.info("开始准备基础实体目录；资源数据将在任务中按需准备")
+        logger.debug("准备基础实体目录；资源数据将在任务中按需准备")
         progress_callback(OperationProgress("update", "data", "started"))
         try:
             app.prepare_update_data(force_update=force_update)
@@ -122,7 +122,7 @@ def _prepare_shared_entity_data(  # noqa: PLR0913
             logger.opt(exception=True).error("基础实体目录准备失败")
             return SharedDataPreparationResult(generation, scope, StageResult.from_error("update", exc))
         progress_callback(OperationProgress("update", "data", "finished"))
-        logger.info("基础实体目录准备完成")
+        logger.debug("基础实体目录准备完成，等待复检")
         return SharedDataPreparationResult(generation, scope, StageResult("update"))
     options = OperationOptions(
         force_update=force_update,
@@ -214,7 +214,7 @@ class MainWindow(FluentWindow):
         self._shared_data_controller = SharedDataController(
             get_config=lambda: self.settingInterface.config,
             has_incomplete_tasks=self.executionInterface.has_incomplete_tasks,
-            create_app_context_fn=create_source_context,
+            create_app_context_fn=SourceContextBuilder(),
             data_load_worker_cls=SharedDataScanWorker,
             task_worker_cls=TaskWorker,
             entity_data_loader_cls=EntityDataLoader,

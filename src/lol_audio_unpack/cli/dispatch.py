@@ -101,11 +101,11 @@ def _log_stage_start(stage: str, detail: str | None = None) -> None:
 
 
 def _log_stage_done(stage: str, detail: str | None = None) -> None:
-    """输出 CLI 阶段完成日志，并保持调用方归属。"""
+    """留存 CLI 阶段诊断，业务完成由应用层播报。"""
     message = f"{stage}阶段完成"
     if detail:
         message = f"{message}: {detail}"
-    logger.opt(depth=1).success(message)
+    logger.opt(depth=1).debug(message)
 
 
 def _log_stage_result(stage: str, result: StageResult, detail: str | None = None) -> None:

@@ -78,11 +78,6 @@ class DataUpdater:
 
         self.version_manifest_path.mkdir(parents=True, exist_ok=True)
 
-        # 记录初始化信息
-        logger.debug(
-            f"DataUpdater 初始化完成 - 版本: {self.version}, 语言: {self.process_languages}, 强制更新: {force_update}"
-        )
-
     def _prepare_language_list(self, languages: list[str]) -> list[str]:
         """准备处理语言列表，确保default在列表中"""
         process_languages = ["default"]
@@ -229,7 +224,7 @@ class DataUpdater:
             return text
         return text.replace("\u00a0", " ")
 
-    @performance_monitor(level="INFO")
+    @performance_monitor(level="TRACE")
     def check_and_update(self) -> Path:
         """检查游戏版本并更新数据"""
         if (
@@ -238,24 +233,23 @@ class DataUpdater:
         ):
             if self._is_lobby_audio_enabled():
                 self.ensure_lobby_audio(read_data(self.data_file_base).get("champions", {}))
-            logger.info(f"数据文件已是最新版本 {self.version} 且包含所有请求的语言，无需更新。")
             # 返回基础路径，让调用者决定使用哪个具体文件
             return self.data_file_base
 
         run_temp_path = self.temp_path / f"update_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
         run_temp_path.mkdir(parents=True, exist_ok=True)
-        logger.debug(f"创建临时目录用于解包: {run_temp_path}")
+        logger.trace(f"创建临时目录用于解包: {run_temp_path}")
 
         try:
             self._process_data(run_temp_path)
             # 日志展示已经完成发布的固定格式路径。
-            logger.success(f"数据更新完成: {self.data_file_base.with_suffix('.msgpack')}")
+            logger.info(f"基础实体数据已保存: {self.data_file_base.with_suffix('.msgpack')}")
             return self.data_file_base
         finally:
             if not self._is_dev_mode():
                 try:
                     shutil.rmtree(run_temp_path)
-                    logger.debug(f"已清理临时目录: {run_temp_path}")
+                    logger.trace(f"已清理临时目录: {run_temp_path}")
                 except OSError:
                     # 使用现代的异常记录方式
                     logger.opt(exception=True).error(f"清理临时目录失败: {run_temp_path}")
@@ -331,15 +325,15 @@ class DataUpdater:
         logger.info(f"需要更新数据文件，缺少语言: {missing_languages}")
         return False
 
-    @performance_monitor(level="DEBUG")
+    @performance_monitor(level="TRACE")
     def _process_data(self, temp_path: Path) -> None:
         """处理游戏数据，包括提取、合并和验证"""
 
         for language in self.process_languages:
-            logger.info(f"正在处理 {language} 语言数据...")
+            logger.info("正在提取英雄与地图信息（{}）……", "基础资源" if language == "default" else language)
             self._extract_wad_data(temp_path, language)
 
-        logger.info("合并多语言数据...")
+        logger.debug("开始合并已提取的多语言数据")
         self._merge_and_build_data(temp_path)
 
         if self._is_lobby_audio_enabled():
@@ -355,7 +349,7 @@ class DataUpdater:
         else:
             raise FileNotFoundError(f"未能创建合并数据文件: {source_file}")
 
-    @performance_monitor(level="DEBUG")
+    @performance_monitor(level="TRACE")
     def _persist_lobby_audio_files(self, temp_path: Path) -> None:
         """将临时目录中的大厅音频持久化到 manifest 目录。"""
         temp_version_path = temp_path / self.version
@@ -397,7 +391,7 @@ class DataUpdater:
         logger.trace(f"多语言JSON加载完成，共 {len(loaded_data)} 种语言")
         return loaded_data
 
-    @performance_monitor(level="DEBUG")
+    @performance_monitor(level="TRACE")
     def _merge_and_build_data(self, temp_dir: Path) -> None:
         """聚合所有数据处理和合并逻辑"""
         base_path = temp_dir / self.version
@@ -507,7 +501,7 @@ class DataUpdater:
         )
 
         # 记录英雄处理完成统计
-        logger.success(f"英雄数据合并完成，共处理 {len(final_champions)} 个英雄")
+        logger.info(f"英雄数据合并完成，共处理 {len(final_champions)} 个英雄")
 
         logger.info("合并地图数据并装配 bin 元数据...")
         maps_by_lang = self._load_language_json(base_path, "maps.json")
@@ -551,7 +545,7 @@ class DataUpdater:
             logger.debug(f"地图 bin 元数据装配完成，共 {map_bin_count} 个地图 binPath")
 
             # 记录地图处理完成统计
-            logger.success(f"地图数据合并完成，共处理 {len(final_maps)} 个地图")
+            logger.info(f"地图数据合并完成，共处理 {len(final_maps)} 个地图")
         else:
             logger.warning("未找到default语言的地图数据，跳过处理。")
 
@@ -559,13 +553,13 @@ class DataUpdater:
         write_data(final_result, base_path / "data", dev_mode=self._is_dev_mode())
 
         # 记录最终处理完成统计
-        logger.success(
+        logger.debug(
             f"数据合并完成 - 英雄: {len(final_result.get('champions', {}))}, "
             f"地图: {len(final_result.get('maps', {}))}, "
             f"语言: {len(self.process_languages)}"
         )
 
-    @performance_monitor(level="DEBUG")
+    @performance_monitor(level="TRACE")
     def _extract_wad_data(self, out_dir: StrPath, region: str) -> None:
         """从WAD文件提取JSON数据"""
         out_path = Path(out_dir) / self.version / region
@@ -615,7 +609,7 @@ class DataUpdater:
                     logger.trace(f"从 {wad_file.name} 提取英雄详细信息")
                     WAD(wad_file).extract(champion_hashes, output_file_name)
 
-                logger.success(f"英雄信息提取完成，共 {len(champion_hashes)} 个英雄，将进入 bin 元数据装配")
+                logger.info(f"英雄信息提取完成，共 {len(champion_hashes)} 个英雄，将进入 bin 元数据装配")
 
                 if self._is_lobby_audio_enabled():
                     lobby_audio_hashes: list[str] = []

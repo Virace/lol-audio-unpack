@@ -1,5 +1,6 @@
 """集中管理项目的 Loguru 日志初始化与辅助能力。"""
 
+import re
 import sys
 import time
 from collections.abc import Callable
@@ -18,8 +19,44 @@ __all__ = [
 ]
 
 
+def get_log_level() -> int:
+    """返回当前输出端所需的最低等级，供任务子进程采集日志。"""
+    return LoggingConfiguration.log_level
+
+
+def format_log_paths(record: dict) -> None:
+    """将日志正文中的游戏、输出根目录改为相对路径。"""
+    if record["extra"].get("show_roots"):
+        return
+    for pattern, label in LoggingConfiguration.path_patterns:
+        record["message"] = pattern.sub(
+            lambda match, name=label: "" if match.group()[-1] in "\\/" else name,
+            record["message"],
+        )
+
+
+def log_paths(game_path: Path, output_path: Path) -> None:
+    """在首次选定或切换根目录时确认实际路径。"""
+    roots = (game_path.resolve(), output_path.resolve())
+    if roots == LoggingConfiguration.paths:
+        return
+    LoggingConfiguration.paths = roots
+    patterns = []
+    for root, label in sorted(
+        zip(roots, ("游戏目录", "输出目录"), strict=True), key=lambda item: len(str(item[0])), reverse=True
+    ):
+        prefix = r"[\\/]".join(re.escape(part) for part in re.split(r"[\\/]", str(root).rstrip("\\/")))
+        patterns.append((re.compile(prefix + r"(?:[\\/]|(?=$|[\s,，;；:：)'\"}]))", re.IGNORECASE), label))
+    LoggingConfiguration.path_patterns = tuple(patterns)
+    logger.bind(show_roots=True).info("游戏目录：{}\n输出目录：{}", *roots)
+
+
 class LoggingConfiguration:
     """封装项目使用的 Loguru 日志配置。"""
+
+    log_level = 10
+    paths: tuple[Path, ...] = ()
+    path_patterns: tuple[tuple[re.Pattern, str], ...] = ()
 
     @staticmethod
     def _resolve_console_sink(stream: Any) -> Any:
@@ -67,7 +104,13 @@ class LoggingConfiguration:
             show_function_info: 是否显示函数名、行号等信息。
         """
         # 移除默认处理器
+        LoggingConfiguration.log_level = logger.level(log_level.upper()).no
+        if log_file_path:
+            LoggingConfiguration.log_level = min(
+                LoggingConfiguration.log_level, logger.level(file_log_level.upper()).no
+            )
         logger.remove()
+        logger.configure(patcher=format_log_paths)
 
         # 控制台日志格式
         if show_function_info:
@@ -105,7 +148,7 @@ class LoggingConfiguration:
                 log_path.mkdir(parents=True, exist_ok=True)
                 file_sink = log_path / "{time:YYYY-MM-DD_HH-mm-ss}.log"
 
-            # 文件日志格式（更详细，包含完整路径信息）
+            # 文件日志保留毫秒时间和调用位置。
             file_format = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}"
 
             LoggingConfiguration._add_handler_with_enqueue_fallback(

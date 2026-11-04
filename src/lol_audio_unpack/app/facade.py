@@ -29,7 +29,6 @@ from lol_audio_unpack.mapping import (
     build_champions,
     build_maps,
     build_resource_packs,
-    describe_hirc_backend,
 )
 from lol_audio_unpack.model import AudioEntityData
 from lol_audio_unpack.model.progress import OperationProgress
@@ -42,7 +41,6 @@ from .artifacts import resolve_audio_paths
 from .preflight import SourcePreflightError, check_source_files
 from .resource_pack import partition_special_targets
 from .results import EntityResult, ResultStatus, StageResult
-from .source_info import log_source_info
 from .special_content import merge_champion_ids
 from .targets import TargetSelectionError, check_ids, with_common_map
 from .types import AppContext, OperationOptions
@@ -137,16 +135,10 @@ class LolAudioUnpackApp:
         """返回 special target 中的 canonical resource-pack key。"""
         return partition_special_targets(opts.special_targets).resource_pack_targets
 
-    def _describe_mapping_backend(self) -> str:
-        """返回 mapping 流程使用的 HIRC 后端。"""
-        return describe_hirc_backend(self.ctx)
-
     def _check_source(
         self, opts: OperationOptions, *, include_champions: bool = True, include_maps: bool = True
     ) -> None:
         """重新检查本次标准实体与显式资源包，失败发生在任何源处理写入之前。"""
-        # 文件日志已就绪时补记实际源；独立 WAV 等无源任务不依赖客户端配置。
-        log_source_info(self.ctx.config.game_path, self.ctx.game_region, level="DEBUG")
         wads = [ref.identity for ref in opts.resource_pack_wads]
         for key in self._resource_pack_targets(opts):
             payload = self._get_reader().get_resource_pack_banks(key)
@@ -181,6 +173,8 @@ class LolAudioUnpackApp:
             message = f"{label}完成"
             if success_detail:
                 message = f"{message}：{success_detail}"
+            elif result.total_count:
+                message = f"{message}：成功 {result.success_count} 个实体"
             logger.success(message)
             return
 
@@ -514,12 +508,18 @@ class LolAudioUnpackApp:
         """
         opts = self._resolve_operation_options(opts)
         opts = replace(opts, map_ids=with_common_map(opts.map_ids, 0))
-        resource_pack_summary = f"，资源包 WAD {len(opts.resource_pack_wads)} 个" if opts.resource_pack_wads else ""
-        logger.info(
-            f"开始执行更新流程：target={target}，英雄 {len(opts.champion_ids or ())} 个，"
-            f"地图 {len(opts.map_ids or ())} 个{resource_pack_summary}，"
-            f"事件处理={'开启' if opts.process_events else '关闭'}"
-        )
+        resource_only = self._has_resource_pack_targets(opts) and opts.champion_ids is None and opts.map_ids is None
+        scopes = []
+        if not resource_only:
+            for label, ids, included in (
+                ("英雄", opts.champion_ids, target in {"all", "skin"}),
+                ("地图", opts.map_ids, target in {"all", "map"}),
+            ):
+                if included and ids != ():
+                    scopes.append(f"全部{label}" if ids is None else f"{len(ids)} 个{label}")
+        if opts.resource_pack_wads:
+            scopes.append(f"{len(opts.resource_pack_wads)} 个资源包")
+        logger.info("正在准备音频索引：{}", "、".join(scopes) or "基础数据")
         self._reset_reader()
         try:
             try:
@@ -578,14 +578,7 @@ class LolAudioUnpackApp:
             # BIN/discovery 可能在成功或失败前写入部分 artifact，阶段退出后统一换代。
             self._reset_reader()
 
-        self._log_stage_result(
-            result,
-            label="更新流程",
-            success_detail=(
-                f"target={target}，英雄 {len(opts.champion_ids or ())} 个，"
-                f"地图 {len(opts.map_ids or ())} 个{resource_pack_summary}"
-            ),
-        )
+        self._log_stage_result(result, label="更新流程")
         return result
 
     def transcode_wav(
@@ -681,12 +674,6 @@ class LolAudioUnpackApp:
             if opts.wav_output.enabled:
                 self.check_tools(opts)
             reader = self._get_reader()
-            logger.info(
-                f"音频类型配置 - 包含: {list(self.ctx.config.include_types)}, "
-                f"排除: {list(self.ctx.config.exclude_types)}"
-            )
-            logger.info(f"输出路径: {self.ctx.config.output_path}")
-            logger.info(f"语言: {self.ctx.config.game_region}")
 
             has_explicit_champions = opts.champion_ids is not None
             has_explicit_maps = opts.map_ids is not None
@@ -765,14 +752,8 @@ class LolAudioUnpackApp:
         try:
             self.check_targets(opts)
             self.check_tools(opts, mapping=True)
-            backend_label = self._describe_mapping_backend()
             self._check_source(opts, include_champions=include_champions, include_maps=include_maps)
             reader = self._get_reader()
-
-            logger.info(f"缓存路径: {self.ctx.paths.cache_path}")
-            logger.info(f"哈希路径: {self.ctx.paths.hash_path}")
-            logger.info(f"HIRC 后端: {backend_label}")
-            logger.info(f"语言: {self.ctx.config.game_region}")
 
             has_explicit_champions = opts.champion_ids is not None
             has_explicit_maps = opts.map_ids is not None

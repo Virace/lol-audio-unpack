@@ -342,7 +342,6 @@ class ExecutionPage(SmoothScrollArea):
             current_modes=current_modes,
         )
         if update is None:
-            self._log_gui_event("info", "[同步] 已取消从实体总览同步选择。")
             return None
 
         self.taskBuilderPanel.apply_selected_entities(
@@ -355,7 +354,6 @@ class ExecutionPage(SmoothScrollArea):
             special_target_names=update.special_target_names,
             resource_pack_wads=update.resource_pack_wads,
         )
-        self._log_gui_event("info", f"[同步] {update.summary}")
         return update.summary
 
     def is_task_running(self) -> bool:
