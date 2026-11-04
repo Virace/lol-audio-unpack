@@ -49,7 +49,7 @@ class _ProcessSignals:
         self.progress = _QueueSignalEmitter(PROCESS_EVENT_PROGRESS, event_queue)
 
 
-def _run_task_process(task: QueuedExecutionTask, event_queue, log_level: int = 10) -> None:
+def _run_task_process(task: QueuedExecutionTask, event_queue, log_level) -> None:
     """在子进程中执行单条任务，并通过队列回传事件。"""
     if os.name != "nt":
         # 上游转码池继承进程组，取消时可连同其工作进程一起回收。
@@ -68,7 +68,14 @@ def _run_task_process(task: QueuedExecutionTask, event_queue, log_level: int = 1
     # spawn 不继承 GUI 的 sink；只向父进程传递，由父进程统一过滤和写入会话文件。
     logger.remove()
     logger.enable("lol_audio_unpack")
-    sink_id = logger.add(forward_log, level=log_level, backtrace=False, diagnose=False)
+    # 共享门槛随界面设置更新，低等级消息在入队前过滤。
+    sink_id = logger.add(
+        forward_log,
+        level="TRACE",
+        filter=lambda record: record["level"].no >= log_level.value,
+        backtrace=False,
+        diagnose=False,
+    )
     signals = _ProcessSignals(event_queue)
     signals.started.emit()
     logger.debug("任务 #{} 进程已启动：operation_id={}", task.task_id, task.draft.operation_id)
@@ -107,7 +114,8 @@ class ExecutionProcessWorker(QObject):
         self.signals = WorkerSignals()
         self._ctx = mp_context or mp.get_context("spawn")
         self._event_queue = self._ctx.Queue()
-        self._process = self._ctx.Process(target=_run_task_process, args=(task, self._event_queue, get_log_level()))
+        self._log_level = self._ctx.Value("i", get_log_level())
+        self._process = self._ctx.Process(target=_run_task_process, args=(task, self._event_queue, self._log_level))
         self._transport_closed = False
         self._terminal_seen = False
         self._poll_timer = QTimer(self)
@@ -116,8 +124,13 @@ class ExecutionProcessWorker(QObject):
 
     def start(self) -> None:
         """启动子进程并开始轮询事件。"""
+        self.set_log_level(get_log_level())
         self._process.start()
         self._poll_timer.start()
+
+    def set_log_level(self, level: int) -> None:
+        """同步当前输出端需要的最低采集等级。"""
+        self._log_level.value = level
 
     def isRunning(self) -> bool:  # noqa: N802
         """返回子进程是否仍在运行。"""
