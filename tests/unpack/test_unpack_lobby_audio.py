@@ -7,6 +7,8 @@ import pytest
 from loguru import logger
 
 from lol_audio_unpack.app.types import AppConfig, AppContext, AppPaths
+from lol_audio_unpack.manager.files import write_data
+from lol_audio_unpack.manager.lobby import find_lobby_source
 from lol_audio_unpack.model import AudioBank, AudioEntityData
 from lol_audio_unpack.model import binding as resource_binding
 from lol_audio_unpack.unpack import entity as unpack_entity
@@ -52,6 +54,33 @@ def test_localized_voice_never_falls_back_to_default(tmp_path):
     assert unpack_lobby_audio.find_lobby_audio_source(reader, "1", "champion-sfx-audios", ctx=ctx) == (
         lobby / "default" / "champion-sfx-audios" / "1.ogg"
     )
+
+
+@pytest.mark.parametrize("own_present", [False, True])
+def test_lobby_uses_prime_voice_until_own_resource_exists(tmp_path, own_present):
+    """Jade 沿声明复用原英雄语音，独立文件存在时优先使用自身文件。"""
+    write_data({"champions": {"60001": {"relatedPrimeItemId": 1}}}, tmp_path / "data")
+    source_dir = tmp_path / "lobby/zh_CN/champion-choose-vo"
+    source_dir.mkdir(parents=True)
+    prime = source_dir / "1.ogg"
+    prime.write_bytes(b"prime voice")
+    own = source_dir / "60001.ogg"
+    if own_present:
+        own.write_bytes(b"own voice")
+
+    assert find_lobby_source(tmp_path, "zh_CN", "60001", "champion-choose-vo") == (own if own_present else prime)
+    assert not own.exists() or own.read_bytes() == b"own voice"
+
+
+def test_old_jade_catalog_reuses_prime_within_requested_language(tmp_path):
+    """旧目录保留 Jade 身份时仍可复用原英雄；语音保持当前语言归属。"""
+    write_data({"champions": {"60001": {"id": 60001, "alias": "Jade_Annie"}}}, tmp_path / "data")
+    source = tmp_path / "lobby/default/champion-ban-vo/1.ogg"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"english prime voice")
+
+    assert find_lobby_source(tmp_path, "zh_CN", "60001", "champion-ban-vo") is None
+    assert find_lobby_source(tmp_path, "en_US", "60001", "champion-ban-vo") == source
 
 
 @pytest.mark.parametrize("enabled", [True, False])

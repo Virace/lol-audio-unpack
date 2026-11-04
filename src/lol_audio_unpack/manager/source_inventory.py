@@ -10,6 +10,7 @@ from pathlib import Path
 from league_tools.formats import WAD
 from loguru import logger
 
+from lol_audio_unpack.app.special_content import get_prime_champion_id
 from lol_audio_unpack.utils.game_layout import (
     FINAL_DIR as FINAL_ROOT,
 )
@@ -19,7 +20,6 @@ from lol_audio_unpack.utils.game_resources import RCP_GLOBAL_PREFIX, WAD_SUFFIX
 # 保留嵌套布局的既有访问名；当前安装位置由 resolve_layout 按游戏根独立选择。
 LCU_ROOT = LCU_DIRS[0]
 LCU_PREFIX = f"{RCP_GLOBAL_PREFIX}/default/v1/"
-JADE_ID_OFFSET = 60000
 _LOCALE = re.compile(r"\.([a-z]{2}_[a-z]{2})\.wad\.client$", re.IGNORECASE)
 
 
@@ -241,7 +241,7 @@ def scan_inventory(game_path: Path, *, generation: int = 0, language: str | None
                     continue
                 if alias.casefold().startswith("jade_"):
                     # Jade 与普通英雄共享物理 WAD；稳定 ID 同时覆盖 Wukong/MonkeyKing 的 alias 差异。
-                    alias = aliases.get(item["id"] - JADE_ID_OFFSET)
+                    alias = aliases.get(get_prime_champion_id(item))
                     if not alias:
                         raise SourceDiscoveryError(f"无法确认 Jade {item['id']} 的共享英雄身份")
                 required = tuple(dict.fromkeys((*bundles, *_wad_paths(GAME_DIR_CHAMPIONS, alias, locale))))
