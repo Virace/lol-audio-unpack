@@ -56,11 +56,10 @@ class SharedDataScanWorker(QThread):
                 logger.opt(exception=exc).error(f"共享实体目录扫描发生未预期失败: generation={self.generation}")
                 self._problem = problem
                 return
-            logger.info(
-                "共享实体目录当前不可用: generation={} code={}",
-                self.generation,
-                problem.code.value,
-            )
+            if problem.code is SharedDataProblemCode.DATASET_MISSING:
+                logger.debug("基础实体数据尚未生成：generation={}", self.generation)
+            else:
+                logger.opt(exception=exc).warning("无法读取实体目录：{}", problem.message)
         self._result = result
 
     @Slot()

@@ -17,9 +17,13 @@ def _build_target_summary(
     modes = modes or ("ids" if champion_ids else "none", "ids" if map_ids else "none")
     parts = []
     for label, ids, mode in zip(("英雄", "地图"), (champion_ids, map_ids), modes, strict=True):
-        value = {"none": "不处理", "all": "全部", "ids": f"指定 {len(ids)} 个"}[mode]
+        if mode == "none":
+            continue
+        value = {"all": "全部", "ids": f"指定 {len(ids)} 个"}[mode]
         parts.append(f"{label}：{value}")
-    return "，".join((*parts, f"特殊内容 {len(special_targets)} 个"))
+    if special_targets:
+        parts.append(f"特殊内容 {len(special_targets)} 个")
+    return "，".join(parts) or "尚未选择处理对象"
 
 
 def _merge_unique_ids(base_ids: tuple[str, ...], incoming_ids: tuple[str, ...]) -> tuple[str, ...]:

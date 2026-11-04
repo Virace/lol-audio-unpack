@@ -195,7 +195,6 @@ def execute_tasks(  # noqa: PLR0913
 
     if not tasks:
         note = "没有任何任务需要执行"
-        logger.info(note)
         return StageResult.from_entities("mapping", (), note=note)
 
     unknown_entity_type = next(
@@ -214,7 +213,7 @@ def execute_tasks(  # noqa: PLR0913
         f"开始构建 {total_tasks} 个实体的事件映射 ({' 和 '.join(summary_parts)})，"
         f"模式: {'多线程' if max_workers > 1 else '单线程'} (workers: {max_workers})"
     )
-    logger.info(f"HIRC 后端: {mapping_session.describe_hirc_backend(ctx)}")
+    logger.debug(f"HIRC 后端: {mapping_session.describe_hirc_backend(ctx)}")
 
     show_exception = bool(getattr(ctx.config, "dev_mode", False))
     # manager 和 runtime_cache 都按“整轮任务”复用，
@@ -390,7 +389,7 @@ def execute_tasks(  # noqa: PLR0913
         f"耗时 {duration:.2f}s"
     )
     if stage_result.status is ResultStatus.SUCCESS:
-        logger.success(summary_message)
+        logger.debug(summary_message)
     elif stage_result.status is ResultStatus.PARTIAL:
         logger.warning(summary_message)
     else:

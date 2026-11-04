@@ -523,8 +523,7 @@ class SharedDataController(QObject):
                 )
             )
             logger.info(
-                "共享实体目录复检完成: generation={} champions={} maps={}",
-                generation,
+                "实体目录已就绪：{} 个英雄、{} 张地图",
                 scan.summary.champion_loaded,
                 scan.summary.map_loaded,
             )
@@ -557,6 +556,15 @@ class SharedDataController(QObject):
             and scan.all_blocking_problems_repairable
         )
         if can_auto_prepare:
+            if any(problem.code is SharedDataProblemCode.DATASET_MISSING for problem in scan.blocking_problems):
+                logger.info("当前版本尚未生成基础实体数据，开始提取")
+            elif any(problem.code is SharedDataProblemCode.ARTIFACT_CORRUPT for problem in scan.blocking_problems):
+                logger.warning("检测到损坏的实体数据，开始重新准备")
+            else:
+                logger.info("现有实体数据需要更新，开始准备")
+            logger.debug(
+                "自动准备原因：{}", [(problem.code.value, problem.scope) for problem in scan.blocking_problems]
+            )
             self.auto_prepare_attempted = True
             self._prepare_scope = SharedDataRepairScope.from_scan(scan)
             self.start_prepare(
@@ -647,7 +655,7 @@ class SharedDataController(QObject):
         if generation != self.generation:
             return
         self._replace_state(phase=SharedDataPhase.PREPARING, progress=None, prepare_attempted=True)
-        logger.info(
+        logger.debug(
             "开始共享实体数据准备: generation={} full={} champions={} maps={}",
             generation,
             self._prepare_scope.full,
@@ -771,10 +779,18 @@ class SharedDataController(QObject):
             f"共享实体数据进入终态: generation={self.generation} phase={phase.value} "
             f"code={problem.code.value if problem is not None else 'unknown'}"
         )
+        logger.debug(log_message)
+        message = problem.message if problem is not None else "请重试实体数据更新。"
         if phase is SharedDataPhase.FAILED:
-            logger.error(log_message)
+            logger.error("实体数据准备失败：{}", message)
+        elif (
+            phase is SharedDataPhase.BLOCKED
+            and problem is not None
+            and problem.code is SharedDataProblemCode.CONFIGURATION_REQUIRED
+        ):
+            logger.info("等待配置：{}", message)
         else:
-            logger.warning(log_message)
+            logger.warning("实体数据尚未就绪：{}", message)
         level = "error" if phase is SharedDataPhase.FAILED else "warning"
         title = notice_title or {
             SharedDataPhase.BLOCKED: describe_shared_data_state(self.state).status_text,

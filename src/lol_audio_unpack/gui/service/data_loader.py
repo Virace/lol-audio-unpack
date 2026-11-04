@@ -631,6 +631,12 @@ class EntityDataLoader:
             for champion in champions
             if not is_structured_special_champion(champion) and not should_hide_champion_by_default(champion)
         ]
+        special_count = sum(is_structured_special_champion(champion) for champion in champions)
+        hidden_count = len(champions) - len(ordinary_champions) - special_count
+        logger.debug(
+            f"目录分区：英雄元数据={len(champions)}，普通可选={len(ordinary_champions)}，"
+            f"特殊英雄={special_count}，隐藏普通英雄={hidden_count}"
+        )
         champion_result = self._scan_required_section(
             "champions",
             ordinary_champions,
@@ -695,7 +701,7 @@ class EntityDataLoader:
         if self._first_scan_unexpected is not None:
             logger.opt(exception=self._first_scan_unexpected).error(log_message)
         elif result.readiness is SharedDataReadiness.COMPLETE or result.all_blocking_problems_repairable:
-            logger.info(log_message)
+            logger.debug(log_message)
         else:
             logger.warning(log_message)
         return result

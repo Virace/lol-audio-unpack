@@ -191,7 +191,7 @@ def scan_inventory(game_path: Path, *, generation: int = 0, language: str | None
         SourceDiscoveryError: 无法可靠取得目录或明确的物理文件规则。
     """
     root = game_path.resolve()
-    logger.info("开始本地资源文件扫描，generation={}", generation)
+    logger.trace("开始本地资源文件扫描，generation={}", generation)
     try:
         lcu_root = resolve_layout(root).lcu_relative
         champions, maps, metadata = read_catalog(root)
@@ -261,5 +261,5 @@ def scan_inventory(game_path: Path, *, generation: int = 0, language: str | None
     except Exception:
         logger.opt(exception=True).error("本地资源目录发现失败，generation={}", generation)
         raise
-    logger.info("本地资源文件扫描完成：{} 个候选语言，generation={}", len(result.languages), generation)
+    logger.trace("本地资源文件扫描完成：{} 个候选语言，generation={}", len(result.languages), generation)
     return result

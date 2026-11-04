@@ -195,9 +195,9 @@ class ExecutionQueueController(QObject):
         )
         row_text = build_row_text(queued_task)
 
-        self.log_requested.emit(GuiLogMessage(level="info", message=f"[队列] {row_text}"))
         started_task = self.start_next_waiting_task()
         if started_task is None:
+            self.log_requested.emit(GuiLogMessage(level="info", message=f"[队列] {row_text}"))
             self.progress_display_requested.emit(
                 QueueProgressUpdate(
                     note_text="0% · 当前任务等待启动。",
@@ -243,9 +243,6 @@ class ExecutionQueueController(QObject):
             self._active_task_id = updated_task.task_id
             self.task_running_changed.emit(True)
             self.task_queue_busy_changed.emit(self.has_incomplete_tasks())
-            self.log_requested.emit(
-                GuiLogMessage(level="info", message=f"[队列] 已自动开始任务：{updated_task.summary}")
-            )
             self.progress_display_requested.emit(
                 QueueProgressUpdate(
                     note_text="当前进度：准备中 · 等待后台线程启动。",

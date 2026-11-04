@@ -327,7 +327,7 @@ def _unpack_bound_entity(  # noqa: PLR0913, PLR0917
         banks = audio.output_banks()
         stats.shared_audio = audio.shared_payload()
         if shared_count := len(entity_data.resource_banks) - len(banks):
-            logger.info("{} 复用 {} 条同源资源声明，只写出规范归属的音频", entity_data.entity_name, shared_count)
+            logger.debug("{} 复用 {} 条同源资源声明，只写出规范归属的音频", entity_data.entity_name, shared_count)
 
     for bank in banks:
         binding = bank.binding
@@ -445,7 +445,7 @@ def _unpack_bound_entity(  # noqa: PLR0913, PLR0917
         (detail["wad"], detail["entryHash"]) for detail in stats.binding_details if detail["outcome"] == "no_audio"
     }
     if no_audio:
-        logger.info(f"{entity_data.entity_name} 有 {len(no_audio)} 个 BNK 不含内嵌音频，已正常跳过")
+        logger.debug(f"{entity_data.entity_name} 有 {len(no_audio)} 个 BNK 不含内嵌音频，已正常跳过")
     diagnostics = entity_data.binding_diagnostics
     source_completeness = "partial" if diagnostics is not None and diagnostics.unresolved_bins else "complete"
     stats.set_binding_completeness(source_completeness)
@@ -456,7 +456,7 @@ def _finish_unpack_stats(
 ) -> None:
     """输出 binding 分支的实体摘要，并写入与旧格式兼容的报告。"""
     summary = stats.get_simple_summary()
-    logger.info(
+    logger.debug(
         "{} 内容对象：新增 {}、复用 {}，可见文件复制降级 {}",
         entity_data.entity_name,
         stats.new_objects,
@@ -483,7 +483,7 @@ def _finish_unpack_stats(
 
 
 @logger.catch(reraise=True)
-@performance_monitor(level="DEBUG")
+@performance_monitor(level="TRACE")
 @with_library
 def unpack_entity(  # noqa: PLR0913
     entity_data: AudioEntityData,
@@ -532,7 +532,7 @@ def unpack_entity(  # noqa: PLR0913
     )
     if entity_data.binding_diagnostics is not None:
         with stats_context as stats:
-            logger.info(f"按 resource binding 解包 {entity_data.entity_name} (ID:{entity_data.entity_id})")
+            logger.info(f"正在解包 {entity_data.entity_name} (ID:{entity_data.entity_id})")
             pool = ThreadPoolExecutor(max_workers=max_workers) if max_workers > 1 else None
             if pool is not None:
                 logger.debug("启动 {} 的 WEM 写出线程池：workers={}", entity_data.entity_name, max_workers)

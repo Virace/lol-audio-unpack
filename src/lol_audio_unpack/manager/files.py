@@ -54,7 +54,7 @@ def read_data(path: Path, *, dev_mode: bool = False, log_errors: bool = True) ->
     """
     actual_file = find_data_file(path, dev_mode=dev_mode)
     if not actual_file:
-        logger.warning(f"MessagePack 数据文件不存在: {path.with_suffix('.msgpack')}")
+        logger.debug(f"MessagePack 数据尚未生成: {path.with_suffix('.msgpack')}")
         return {}
     try:
         # 实体目录存在整数键；不能用会吞掉解析异常的通用兼容 loader 读取权威产物。
@@ -161,7 +161,6 @@ def needs_update(
     if data_version != current_version:
         return True
 
-    logger.debug(f"文件已是最新版本 ({current_version})，跳过更新: {base_path.name}")
     return False
 
 

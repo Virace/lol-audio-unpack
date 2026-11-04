@@ -71,7 +71,6 @@ def validate_install_version(game_path: Path, game_version: str) -> None:
         return
 
     if lcu_version == game_version:
-        logger.debug(f"本地 GAME / LCU 主版本一致: {game_version}")
         return
 
     logger.warning(
