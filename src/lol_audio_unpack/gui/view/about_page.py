@@ -730,6 +730,15 @@ class AboutPage(SmoothScrollArea):
             cards_layout.addWidget(AboutActionCard(spec, cards_row))
         cards_layout.addStretch(1)
         root_layout.addWidget(cards_row)
+
+        id_notice = BodyLabel(
+            "跨版本音频说明：音频 ID 和事件名可能随游戏版本变化，不能作为跨版本的唯一对照。\n"
+            "ID 相同不代表音频相同；ID 或文件数据变化，也不一定代表台词或听感变化。请结合实际试听判断。",
+            self.view,
+        )
+        id_notice.setWordWrap(True)
+        id_notice.setAlignment(Qt.AlignHCenter)
+        root_layout.addWidget(id_notice)
         root_layout.addStretch(1)
 
     def _show_sponsor_dialog(self) -> None:

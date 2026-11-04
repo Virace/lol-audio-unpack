@@ -38,7 +38,13 @@ def find_lobby_audio_source(
     Returns:
         命中的语音文件路径；未找到时返回 ``None``。
     """
-    return find_lobby_source(ctx.version_path("manifest", reader.version), ctx.game_region, champion_id, category)
+    return find_lobby_source(
+        ctx.version_path("manifest", reader.version),
+        ctx.game_region,
+        champion_id,
+        category,
+        champions=reader.data["champions"],
+    )
 
 
 def link_audio(source: Path, target: Path) -> str:
@@ -111,10 +117,7 @@ def attach_lobby_audio(
     for category, target_name in LOBBY_FILES.items():
         source = find_lobby_audio_source(reader, entity.entity_id, category, ctx=ctx)
         if source is None:
-            logger.warning(
-                f"未找到英雄 {entity.entity_id} 的大厅音频文件: {category}/{entity.entity_id}.ogg；"
-                "已尝试从本地 LCU 补齐，请检查所选语言资源是否完整。"
-            )
+            logger.warning("英雄 {} 的大厅音频未找到：{}（语言={}）", entity.entity_id, category, ctx.game_region)
             continue
 
         target = target_dir / target_name
@@ -122,7 +125,8 @@ def attach_lobby_audio(
         persisted_paths.append(target)
         if persisted_artifact_callback is not None:
             persisted_artifact_callback(target)
-        logger.debug(f"大厅音频已写入: {target} (mode={mode})")
+        source_path = source.relative_to(ctx.version_path("manifest", reader.version))
+        logger.debug("大厅音频已写入：{}（来源：{}，mode={}）", target, source_path, mode)
     save_outputs(
         ctx.config.output_path,
         reader.version,

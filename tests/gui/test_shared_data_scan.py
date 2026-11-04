@@ -321,13 +321,13 @@ def test_scan_catalog_logs_schema_mismatches_once_without_tracebacks(monkeypatch
         return original_builder(entity_type, entity, version)
 
     monkeypatch.setattr(loader, "_build_entity_row", build_row)
-    info_messages: list[str] = []
+    debug_messages: list[str] = []
     opt_calls: list[dict[str, object]] = []
     monkeypatch.setattr(
         data_loader_module,
         "logger",
         SimpleNamespace(
-            info=info_messages.append,
+            debug=debug_messages.append,
             warning=lambda _message: None,
             opt=lambda **kwargs: opt_calls.append(kwargs) or SimpleNamespace(error=lambda _message: None),
         ),
@@ -337,8 +337,9 @@ def test_scan_catalog_logs_schema_mismatches_once_without_tracebacks(monkeypatch
 
     assert result.readiness is SharedDataReadiness.FAILED
     assert opt_calls == []
-    assert len(info_messages) == 1
-    assert "champions expected=2 loaded=0 failed=2" in info_messages[0]
+    scan_messages = [message for message in debug_messages if "共享实体目录扫描完成" in message]
+    assert len(scan_messages) == 1
+    assert "champions expected=2 loaded=0 failed=2" in scan_messages[0]
 
 
 def test_scan_catalog_all_required_section_failures_are_failed(monkeypatch) -> None:

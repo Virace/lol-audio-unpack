@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Literal
 
 from lol_audio_unpack.utils.common import sanitize_filename
+from lol_audio_unpack.utils.game_layout import GAME_DIR_CHAMPIONS, GAME_DIR_MAPS
 
 from .resource_pack import RESOURCE_PACK_ENTITY_TYPE, resource_pack_path_component
 
@@ -19,9 +20,6 @@ AUDIO_TYPE_MUSIC: Literal["MUSIC"] = "MUSIC"
 DIR_CHAMPIONS: Literal["champions"] = "champions"
 DIR_MAPS: Literal["maps"] = "maps"
 DIR_RESOURCE_PACKS: Literal["resource_packs"] = "resource_packs"
-
-GAME_DIR_CHAMPIONS: Literal["Champions"] = "Champions"
-GAME_DIR_MAPS: Literal["Maps"] = "Maps"
 
 ENTITY_NAME_SEPARATOR: Literal["·"] = "·"
 

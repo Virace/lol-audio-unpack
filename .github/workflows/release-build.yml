@@ -215,6 +215,40 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
 
+  # 分发镜像是附加渠道；独立 job 失败不改变 GitHub 发布结果，也不阻塞文档任务。
+  sync-gitee:
+    needs: build-release
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    concurrency:
+      group: gitee-release-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout synchronization script
+        uses: actions/checkout@v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: '3.13'
+
+      - name: Synchronize published release to Gitee
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: python scripts/sync_gitee_release.py --tag "$RELEASE_TAG"
+
+      - name: Report mirror job failure
+        if: failure()
+        run: |
+          echo '::warning::Gitee 同步失败，GitHub Release 已发布且不受影响。'
+          echo 'Gitee 同步 job 失败，请检查同步日志并补传；GitHub Release 不受影响。' >> "$GITHUB_STEP_SUMMARY"
+
   # GITHUB_TOKEN 发布的 Release 不会触发另一条 release workflow，发布成功后直接调用。
   deploy-docs:
     needs: [verify-tag-target, build-release]

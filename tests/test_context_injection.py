@@ -177,7 +177,7 @@ def test_attach_lobby_audio_to_champion_uses_ctx_without_global_config(
         wad_root="Game/root.wad.client",
         wad_language=None,
     )
-    reader = SimpleNamespace(version=version)
+    reader = SimpleNamespace(version=version, data={"champions": {}})
 
     unpack_lobby_audio.attach_lobby_audio(entity_data, reader, ctx=ctx)
 

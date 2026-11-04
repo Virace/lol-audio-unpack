@@ -76,11 +76,13 @@ def _build_target_summary(
     """构造当前目标范围摘要。"""
     parts = []
     for label, ids, mode in zip(("英雄", "地图"), (champion_ids, map_ids), modes, strict=True):
-        scope = {"none": "不处理", "all": "全部", "ids": f"指定 {len(ids)} 个"}[mode]
+        if mode == "none":
+            continue
+        scope = {"all": "全部", "ids": f"指定 {len(ids)} 个"}[mode]
         parts.append(f"{label}：{scope}")
     if special_targets:
         parts.append(f"特殊内容 {len(special_targets)} 个")
-    summary = "，".join(parts)
+    summary = "，".join(parts) or "尚未选择处理对象"
     return f"{summary}（{'、'.join(special_target_names)}）" if special_target_names else summary
 
 
@@ -335,7 +337,7 @@ class TaskCreationCard(HeaderCardWidget):
     def _build_action_controls(self) -> None:
         """创建任务范围摘要与底部操作控件。"""
         self.hintIcon = IconWidget(InfoBarIcon.INFORMATION, self)
-        self.target_summary_value = BodyLabel("执行范围：英雄不处理，地图不处理", self)
+        self.target_summary_value = BodyLabel("尚未选择处理对象", self)
         self.target_summary_value.setWordWrap(True)
         self.extract_task_cb = CheckBox("音频解包", self)
         self.extract_task_cb.setChecked(True)

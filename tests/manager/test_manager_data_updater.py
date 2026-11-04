@@ -397,7 +397,7 @@ def test_extract_wad_data_logs_bin_metadata_preparation(tmp_path, monkeypatch):
         logger.remove(sink_id)
 
     assert any("DEBUG|准备提取 1 个英雄详细信息，用于后续 bin 元数据装配" in line for line in log_lines)
-    assert any("SUCCESS|英雄信息提取完成，共 1 个英雄，将进入 bin 元数据装配" in line for line in log_lines)
+    assert any("INFO|英雄信息提取完成，共 1 个英雄，将进入 bin 元数据装配" in line for line in log_lines)
 
 
 def test_extract_wad_data_returns_when_region_wad_missing(tmp_path, monkeypatch):

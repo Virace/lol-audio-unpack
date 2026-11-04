@@ -58,7 +58,8 @@ def build_review(draft: ExecutionTaskDraft, catalog: dict[str, list[dict]]) -> E
         row_by_id = {int(row["id"]): row for row in rows}
         requested.extend(f"{label} ID {value}" for value in dict.fromkeys(selected))
         resolved.append(result.valid)
-        counts.append(f"{label} {len(result.valid)} 个" if result.valid else f"{label}不处理")
+        if result.valid:
+            counts.append(f"{label} {len(result.valid)} 个")
         if result.unknown:
             warnings.append(f"{len(result.unknown)} 个{label} ID 未找到，确认后跳过")
             excluded.extend(f"{label} ID {value}" for value in result.unknown)

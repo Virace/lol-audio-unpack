@@ -80,10 +80,9 @@ class ChampionBinProcessor:
         """输出简单的批量处理进度日志。"""
         logger.info(f"{stage_name}进度 {index}/{total}: {entity_id}")
 
-    @performance_monitor(level="DEBUG")
+    @performance_monitor(level="TRACE")
     def _update_champions(self, data: dict) -> tuple[UpdateEntityResult, ...]:
         """按英雄 ID 更新 banks/events，并返回逐实体结果。"""
-        logger.info("开始处理英雄音频数据...")
         self.champion_banks_dir.mkdir(parents=True, exist_ok=True)
         self.champion_events_dir.mkdir(parents=True, exist_ok=True)
 
@@ -132,8 +131,6 @@ class ChampionBinProcessor:
                 failed_count,
                 partial_count,
             )
-        else:
-            logger.success(f"英雄Banks数据更新完成，共处理 {total_champions} 个英雄")
         return tuple(results)
 
     def _emit_progress(
@@ -159,7 +156,7 @@ class ChampionBinProcessor:
             )
         )
 
-    @performance_monitor(level="DEBUG")
+    @performance_monitor(level="TRACE")
     def _process_champion_skins(self, champion_data: ChampionData, champion_id: str) -> UpdateEntityResult:
         """
         处理单个英雄的所有皮肤，提取音频数据并生成独立文件
@@ -285,7 +282,7 @@ class ChampionBinProcessor:
             all(status in {"shared", "absent"} for status in audio.values())
             for audio in champion_banks_data["skinAudio"].values()
         )
-        logger.info(
+        logger.debug(
             f"英雄 {champion_id} ({alias}) 音频检查完成：{shared_count} 个皮肤无独立 VO/SFX，已记录共享或无声明状态"
         )
         self._log_binding_summary(f"英雄 {champion_id} ({alias})", diagnostics.completeness, diagnostics.to_dict())

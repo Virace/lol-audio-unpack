@@ -16,7 +16,7 @@
 
 </div>
 
-[下载](https://github.com/Virace/lol_extract_voice/releases/latest) · [界面使用](docs/gui/usage.md) · [控制台使用](docs/cli-package.md) · [Python API](docs/api/python_api.md)
+[GitHub 下载](https://github.com/Virace/lol-audio-unpack/releases/latest) · [Gitee 下载](https://gitee.com/x-item/lol-audio-unpack/releases) · [界面使用](docs/gui/usage.md) · [控制台使用](docs/cli-package.md) · [Python API](docs/api/python_api.md)
 
 ![实体总览中查找与试听游戏音频](docs/images/gui.png)
 
@@ -31,7 +31,9 @@
 
 ## 下载与开始使用
 
-在 [GitHub Releases](https://github.com/Virace/lol_extract_voice/releases/latest) 中选择需要的附件。
+在 [GitHub Releases](https://github.com/Virace/lol-audio-unpack/releases/latest) 中选择需要的附件。
+中国境内用户也可到 [Gitee Releases](https://gitee.com/x-item/lol-audio-unpack/releases) 下载同一版本的程序。
+新版本先在 GitHub 发布，再同步到 Gitee；同步未完成时，Gitee 的版本可能稍晚。网盘由维护者手动更新。
 发布页目前提供 Windows x64 打包版；Linux、macOS 等系统可 [从仓库运行](#从仓库运行)，无需打包。
 
 | 版本 | 附件名称 | 使用方式 |
@@ -57,7 +59,7 @@ Linux（如 Ubuntu、Debian、Fedora）、macOS 和其他 UNIX 系统可直接�
 在终端中执行，PowerShell、bash、zsh 均可：
 
 ```sh
-git clone https://github.com/Virace/lol_extract_voice.git lol_audio_unpack
+git clone https://github.com/Virace/lol-audio-unpack.git lol_audio_unpack
 cd lol_audio_unpack
 uv sync --extra gui
 uv run unpack-gui

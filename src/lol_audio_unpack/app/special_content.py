@@ -82,6 +82,16 @@ SPECIAL_CONTENT_PROFILES = (
     SWARM_PROFILE,
 )
 SPECIAL_CONTENT_GROUPS = (*SPECIAL_CONTENT_PROFILES, HISTORICAL_RESOURCE_PACKS_PROFILE)
+JADE_ID_OFFSET = 60000
+
+
+def get_prime_champion_id(champion: Mapping[str, Any]) -> int | None:
+    """返回关联的原英雄 ID；旧 Jade 元数据沿用已有的 ID 对应规则。"""
+    if champion.get("relatedPrimeItemId") is not None:
+        return int(champion["relatedPrimeItemId"])
+    if str(champion.get("alias", "")).casefold().startswith(LEGACY_CHAMPIONS_PROFILE.prefix.casefold()):
+        return int(champion["id"]) - JADE_ID_OFFSET
+    return None
 
 
 def _normalized_wad_basename(champion: Mapping[str, Any]) -> str:
@@ -244,6 +254,7 @@ __all__ = [
     "SpecialContentProfile",
     "build_special_content_item",
     "build_special_target_key",
+    "get_prime_champion_id",
     "get_special_content_profile",
     "is_structured_special_champion",
     "merge_champion_ids",

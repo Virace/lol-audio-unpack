@@ -270,7 +270,12 @@ def test_create_app_context_missing_required_setting_raises(tmp_path: Path) -> N
 
 def test_setup_app_returns_context_with_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     captured: dict[str, object] = {}
-    fake_context = SimpleNamespace(paths=SimpleNamespace(log_path=tmp_path / "output" / "logs"), config=None)
+    fake_context = SimpleNamespace(
+        paths=SimpleNamespace(log_path=tmp_path / "output" / "logs"),
+        config=SimpleNamespace(
+            game_path=tmp_path / "game", game_region="zh_CN", output_path=tmp_path / "output", include_types=("VO",)
+        ),
+    )
 
     def fake_create_app_context(*, settings=None, force_reload=False, dev_mode=False, runtime_cache=None):
         captured["settings"] = settings

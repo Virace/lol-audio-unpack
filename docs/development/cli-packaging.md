@@ -51,3 +51,35 @@ uv run --no-sync python scripts/pyinstaller/build_cli.py
 构建因 runner 或发布流程问题中断时，可在 Actions 手动运行 `release-build`，填写已有 tag。
 手动入口使用当前工作流，但校验并检出该 tag 的精确提交，只接受已包含于 `main` 的提交；
 不会移动 tag，也不会把当前 `main` 的产品代码冒充该版本发布。
+
+## Gitee 成品分发
+
+GitHub Release 发布成功后，`release-build` 的独立 `sync-gitee` job 调用
+`scripts/sync_gitee_release.py`，将实际发布的说明、预发布标记和全部附件同步到
+[Gitee 分发仓库](https://gitee.com/x-item/lol-audio-unpack/releases)。不镜像源代码，
+Gitee 标签只指向该仓库自身的 README 提交；README 模板保存在 `.github/gitee/README.md`。
+网盘不进入自动化，由维护者后续手动上传。
+
+GitHub 仓库需要 `GITEE_TOKEN` repository secret，Token 对目标 Gitee 仓库须有 Release
+与附件的读写权限，以及 README 文件的更新权限。Token 仅通过环境变量和请求认证使用，不写入参数、文件或日志。
+脚本只依赖 Python 标准库，以及 runner 已提供的 `gh` 和 `curl`。
+
+同步 job 最长运行 45 分钟，单个附件上传最多等待 20 分钟，并设置 `continue-on-error: true`。它依赖 GitHub 发布成功，
+文档部署独立依赖 `build-release`，因此 Gitee 失败不会阻塞 GitHub Release 或文档部署。
+失败会在 Actions 日志与 job 摘要中留下警告；同一仓库的同步串行执行，避免不同版本同时更新 README。
+
+README 的版本区域自动记录当前版本、GitHub 发布时间、已核对的附件数量与最近同步时间。
+上传后通过公开下载地址核对 SHA-256，全部通过才显示“已同步”；失败时尽可能记录“同步未完成”。
+正文和文档链接保留在状态区域之外。补传旧版本会保留 README 中发布时间较新的版本信息。
+
+补传不必重新构建程序。在已有 `gh` GitHub 登录的环境执行：
+
+```powershell
+uv run --no-sync python scripts/sync_gitee_release.py --tag <已有标签> --token-file <Token文件> --dry-run
+uv run --no-sync python scripts/sync_gitee_release.py --tag <已有标签> --token-file <Token文件>
+```
+
+只读预检不下载附件、不修改 Gitee。实际同步先校验 GitHub 下载的大小与可用的 SHA-256
+摘要，已有 Gitee 同名附件会下载核对摘要，一致则跳过，缺失则补传；同名内容不同时停止，
+保留现有文件供维护者处理。上传中断可直接重跑同一命令。
+本地下载文件保留在 `.temp/.gitee-sync/<本次任务目录>/`，确认不再需要后手动清理对应目录。

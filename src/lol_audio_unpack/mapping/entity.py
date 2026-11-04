@@ -660,7 +660,7 @@ def _log_entity_summary(
 
 
 @logger.catch(reraise=True)
-@performance_monitor(level="DEBUG")
+@performance_monitor(level="TRACE")
 def build_entity(  # noqa: PLR0913
     entity_data: AudioEntityData,
     reader: DataReader,
@@ -910,7 +910,6 @@ def integrate_entity(
     for sub_entity in sub_entities:
         sub_id = str(sub_entity["id"])
         if sub_id not in mapping_data:
-            logger.debug(f"皮肤/地图 {sub_id} 没有事件数据，跳过")
             continue
 
         if entity_data.entity_type == "resource_pack":
@@ -956,7 +955,7 @@ def integrate_entity(
 
         if integrated_item["events"]:
             processed_items.append(integrated_item)
-            logger.debug(f"皮肤/地图 {sub_id} 整合完成，包含 {len(integrated_item['events'])} 个音频类别")
+            logger.trace(f"皮肤/地图 {sub_id} 整合完成，包含 {len(integrated_item['events'])} 个音频类别")
 
     if entity_data.entity_type == "champion":
         integrated_data["data"]["skins"] = processed_items
@@ -968,7 +967,7 @@ def integrate_entity(
         else:
             raise ValueError(f"未知的实体类型: {entity_data.entity_type}")
 
-    logger.success(f"整合完成，{entity_data.entity_name} 包含 {len(processed_items)} 个有效皮肤/地图数据")
+    logger.debug(f"整合完成，{entity_data.entity_name} 包含 {len(processed_items)} 个有效皮肤/地图数据")
     return integrated_data
 
 

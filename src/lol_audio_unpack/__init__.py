@@ -10,13 +10,14 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from .app import create_app_context as _create_app_context
-from .utils.logging import setup_logging
+from .app.source_info import log_source_info, read_source_info
+from .utils.logging import log_paths, setup_logging
 from .utils.versioning import resolve_runtime_version
 
 if TYPE_CHECKING:
     from .app import AppContext
 
-_STATIC_VERSION = "3.11.0"
+_STATIC_VERSION = "3.11.1"
 __version__ = resolve_runtime_version(Path(__file__).resolve().parents[2], _STATIC_VERSION)
 
 logger.disable("lol_audio_unpack")
@@ -49,6 +50,7 @@ def setup_app(
         logger.add(sys.stdout, level=log_level.upper(), enqueue=False, colorize=True)
         logger.warning("日志队列初始化失败，已回退为非 enqueue 模式。")
 
+    logger.info("正在检查本地资源与配置……")
     app_context = _create_app_context(dev_mode=dev_mode, **kwargs)
     if source_check is not None:
         source_check(app_context)
@@ -60,7 +62,11 @@ def setup_app(
         show_function_info=True,
     )
 
-    logger.info("Application setup complete.")
+    log_paths(app_context.config.game_path, app_context.config.output_path)
+    log_source_info(read_source_info(app_context.config.game_path))
+    language = app_context.config.game_region
+    logger.info("资源语言：{}", "en_US" if language == "default" else language)
+    logger.debug("音频类型：{}", ",".join(app_context.config.include_types))
     return app_context
 
 

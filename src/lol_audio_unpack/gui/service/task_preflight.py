@@ -7,6 +7,8 @@ from pathlib import Path
 from tempfile import gettempdir
 from threading import Event
 
+from loguru import logger
+
 from lol_audio_unpack.app.context import create_app_context
 from lol_audio_unpack.app.facade import LolAudioUnpackApp
 from lol_audio_unpack.config import SettingKey
@@ -30,6 +32,7 @@ def check_task(task: QueuedExecutionTask, cancel: Event) -> tuple[ToolProbe, ...
         wav = request.options
         mapping = False
     else:
+        logger.info("任务 #{}：正在检查所选资源与处理工具……", task.task_id)
         settings.update(params.to_runtime_overrides())
         ctx = create_app_context(settings=settings)
         app = LolAudioUnpackApp(ctx)
