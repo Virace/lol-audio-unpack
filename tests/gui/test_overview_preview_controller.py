@@ -135,6 +135,8 @@ def test_overview_preview_controller_builds_champion_group_labels() -> None:
     )
     loader = SimpleNamespace(
         _load_preview_entity=lambda *_args, **_kwargs: None,
+        ctx=SimpleNamespace(game_region="zh_CN"),
+        build_audio_resolver=lambda *_args, **_kwargs: lambda _path: None,
         load_mapping_preview=lambda entity_type, entity_id: (
             mapping_path,
             {"skins": {"1000": {"events": {}}}},

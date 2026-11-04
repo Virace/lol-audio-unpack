@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     Action,
     CaptionLabel,
+    ComboBox,
     InfoBar,
     InfoBarPosition,
     LineEdit,
@@ -47,7 +48,7 @@ from qfluentwidgets import (
 )
 
 from lol_audio_unpack.app.artifacts import AudioIndexProgress, AudioRef
-from lol_audio_unpack.app.audio_export import AudioExportRequest, ExportTarget
+from lol_audio_unpack.app.audio_export import AudioExportRequest, ExportTarget, freeze_unlisted_export
 from lol_audio_unpack.app.audio_scope import AudioScope
 from lol_audio_unpack.app.facade import LolAudioUnpackApp
 from lol_audio_unpack.app.resource_pack import ResourcePackSelectionError, ResourcePackWadRef
@@ -68,6 +69,7 @@ from lol_audio_unpack.gui.controllers import (
 from lol_audio_unpack.gui.controllers.audio_export import AudioExportController
 from lol_audio_unpack.gui.controllers.contracts import OverviewSelectionSyncRequest
 from lol_audio_unpack.gui.controllers.entity_data_store import EntityDataStore
+from lol_audio_unpack.gui.controllers.library_browser import LibraryBrowser
 from lol_audio_unpack.gui.controllers.overview_preview import (
     ALL_AUDIO_PREVIEW_MODE,
     EVENT_PREVIEW_MODE,
@@ -152,6 +154,8 @@ class OverviewPage(QWidget):
         self.gui_config = None
         self._app_context = None
         self._loader = None
+        self.library_browser = LibraryBrowser(self)
+        self._source_data_store = EntityDataStore(entity_types=("champions", "maps", "special"))
         self._shared_data_state = SharedDataState(SharedDataPhase.BLOCKED, 0)
         self._entity_data_store = EntityDataStore(entity_types=("champions", "maps", "special"))
         self._preview_controller = OverviewPreviewController()
@@ -215,6 +219,9 @@ class OverviewPage(QWidget):
         self._preview_audio_output_device_key = DEFAULT_PREVIEW_AUDIO_OUTPUT_DEVICE_KEY
         self._resource_pack_scan_worker: TaskWorker | None = None
         self._task_busy = False
+        self._library_refresh_timer = QTimer(self)
+        self._library_refresh_timer.setSingleShot(True)
+        self._library_refresh_timer.timeout.connect(self.library_browser.refresh)
         self._entity_lists: dict[str, OverviewEntityListView] = {}
         self._build_ui()
         self.export_controller = AudioExportController(
@@ -224,13 +231,17 @@ class OverviewPage(QWidget):
             parent=self,
             group_by_event=lambda: bool(getattr(self.gui_config, "wav_group_by_event", False)),
         )
-        self.export_controller.export_requested.connect(self.audio_export_requested.emit)
+        self.export_controller.export_requested.connect(self._submit_audio_export)
         self.export_controller.index_requested.connect(self._ensure_audio_refs)
         self._preview_playback_controller = PreviewPlaybackController(parent=self)
         self._preview_playback_controller.playback_state_changed.connect(self._apply_audio_preview_playback_state)
         self._preview_playback_controller.playback_error.connect(self._show_audio_preview_playback_error)
         self.set_shared_data_state(self._shared_data_state)
         self._setup_connections()
+        self.library_browser.options_changed.connect(self._refresh_version_options)
+        self.library_browser.selection_changed.connect(self._on_library_selection)
+        self.library_browser.loaded.connect(self._on_library_loaded)
+        self.library_browser.failed.connect(self._on_library_failed)
         self.destroyed.connect(self._disconnect_theme_refresh_listeners)
         self.destroyed.connect(self._preview_playback_controller.shutdown)
         self.destroyed.connect(self._audio_refs_pool.clear)
@@ -261,6 +272,8 @@ class OverviewPage(QWidget):
         self.set_preview_audio_output_device(
             str(getattr(cfg, "preview_audio_output_device_key", DEFAULT_PREVIEW_AUDIO_OUTPUT_DEVICE_KEY))
         )
+        if hasattr(cfg, "resolve_output_path"):
+            self.library_browser.configure(cfg.resolve_output_path())
 
     def set_shared_data_state(self, state: SharedDataState) -> None:
         """同步共享目录阶段、摘要与总览页选择门禁。
@@ -275,7 +288,9 @@ class OverviewPage(QWidget):
         status_text = display.detail_text if state.active else display.status_text
         self.shared_data_status.set_status(status_text, role=display.status_role)
         self.shared_data_status.setToolTip(display.detail_text)
-        self.shared_data_status.setVisible(state.phase is not SharedDataPhase.READY)
+        self.shared_data_status.setVisible(
+            state.phase is not SharedDataPhase.READY and self.library_browser.selection is None
+        )
         if state.phase is not previous_phase:
             self._update_selection_summary()
             self._sync_current_list_view()
@@ -294,8 +309,18 @@ class OverviewPage(QWidget):
         """注入应用上下文。
 
         Args:
-            app_context: 当前应用上下文；为 ``None`` 时仅保留占位提示。
+            app_context: 当前应用上下文；为 ``None`` 时仍可浏览已有本地音频。
         """
+        self._app_context = app_context
+        self.library_browser.set_source(app_context)
+        if self.gui_config is not None and hasattr(self.gui_config, "resolve_output_path"):
+            root = self.gui_config.resolve_output_path()
+            if self.library_browser.root != root:
+                self.library_browser.configure(root)
+        if self.library_browser.selection is not None:
+            self._update_catalog_subtitle()
+            self.entityListPanel.set_resource_pack_scan_enabled(False)
+            return
         self._audio_refs_token += 1
         self.export_controller.reset()
         self._audio_refs_cache.clear()
@@ -373,6 +398,10 @@ class OverviewPage(QWidget):
 
     def set_entity_data(self, entity_type: str, data: list[dict[str, Any]]) -> None:
         """更新页面缓存的实体数据。"""
+        self._source_data_store.set_rows(entity_type, data)
+        self._refresh_local_outputs()
+        if self.library_browser.selection is not None:
+            return
         if not self._entity_data_store.set_rows(entity_type, data):
             return
 
@@ -390,6 +419,10 @@ class OverviewPage(QWidget):
 
     def update_entity_rows(self, entity_type: str, rows: list[dict[str, Any]]) -> None:
         """按实体 ID 增量更新页面缓存并刷新当前列表。"""
+        self._source_data_store.update_rows(entity_type, rows)
+        self._refresh_local_outputs()
+        if self.library_browser.selection is not None:
+            return
         merged_rows = self._entity_data_store.update_rows(entity_type, rows)
         if merged_rows is None:
             return
@@ -411,6 +444,9 @@ class OverviewPage(QWidget):
 
     def clear_data(self) -> None:
         """清空页面缓存并恢复占位内容。"""
+        self._source_data_store.clear()
+        if self.library_browser.selection is not None:
+            return
         if any(self._selected_entity_ids.values()):
             InfoBar.warning(
                 "目标选择已清除",
@@ -439,6 +475,7 @@ class OverviewPage(QWidget):
         self._show_placeholder("当前暂无可预览的内容。")
 
     def _setup_connections(self) -> None:
+        self.version_combo.currentIndexChanged.connect(self._on_version_changed)
         self.nav_pivot.currentItemChanged.connect(self._on_nav_changed)
         self.preview_mode_pivot.currentItemChanged.connect(self._on_preview_mode_changed)
         self.search_input.textChanged.connect(self._on_search_text_changed)
@@ -555,9 +592,82 @@ class OverviewPage(QWidget):
         return self._entity_lists[self._current_entity_type()]
 
     def _ensure_loader(self) -> EntityDataLoader | None:
+        if self.library_browser.selection is not None:
+            return self.library_browser.loader
         if self._loader is None and self._app_context is not None:
             self._loader = EntityDataLoader(self._app_context)
         return self._loader
+
+    def _browse_context(self):
+        """返回预览和导出的路径上下文，任务仍持有原 AppContext。"""
+        if self.library_browser.selection is not None:
+            loader = self.library_browser.loader
+            return loader.ctx if loader is not None else None
+        return self._app_context
+
+    def _refresh_version_options(self) -> None:
+        browser = self.library_browser
+        blocker = QSignalBlocker(self.version_combo)
+        self.version_combo.clear()
+        source = browser.source
+        if source is not None:
+            self.version_combo.addItem(f"{source.version} · {source.region}（当前客户端）", userData=None)
+        for item in browser.versions:
+            if item != source:
+                self.version_combo.addItem(f"{item.version} · {item.region}", userData=item)
+        if self.version_combo.count() == 0:
+            self.version_combo.addItem("暂无可试听版本", userData=None)
+        index = self.version_combo.findData(browser.selection) if browser.selection is not None else 0
+        self.version_combo.setCurrentIndex(max(0, index))
+        self.version_combo.setEnabled(self.version_combo.count() > 1)
+        del blocker
+        self._update_catalog_subtitle()
+
+    def _on_version_changed(self, index: int) -> None:
+        if index >= 0:
+            self.library_browser.select(self.version_combo.itemData(index))
+
+    def _on_library_selection(self) -> None:
+        """原子清理旧预览，目录载入完成前不允许用旧行发出新请求。"""
+        self._audio_refs_token += 1
+        self._pending_audio_refs_request = None
+        self._pending_event_search = None
+        self._audio_refs_cache.clear()
+        self._loader = None
+        self.export_controller.reset()
+        self._selected_entity_ids = {"champions": set(), "maps": set(), "special": set()}
+        self._show_placeholder("正在读取本地版本…")
+        rows = {} if self.library_browser.selection is not None else self._source_data_store.snapshot()
+        self._replace_catalog(rows, preserve_current=self.library_browser.selection is None)
+        self._refresh_version_options()
+        self.entityListPanel.set_special_interaction_enabled(True)
+        self.entityListPanel.set_resource_pack_scan_enabled(
+            self.library_browser.selection is None and self._app_context is not None and not self._task_busy
+        )
+        self.set_shared_data_state(self._shared_data_state)
+
+    def _replace_catalog(self, rows: dict, *, preserve_current: bool = True) -> None:
+        current_ids = dict(self._current_preview_ids)
+        for entity_type in self._entity_lists:
+            self._entity_data_store.set_rows(entity_type, rows.get(entity_type, []))
+            self._rebuild_entity_list(entity_type)
+        if not preserve_current:
+            # 等待目录时暂存定位 ID；加载完成后再判断它是否仍然存在。
+            self._current_preview_ids = current_ids
+        self._sync_current_list_view()
+
+    def _on_library_loaded(self, rows: dict) -> None:
+        self._replace_catalog(rows)
+        self._update_catalog_subtitle()
+
+    def _on_library_failed(self, message: str) -> None:
+        if self.library_browser.selection is not None and self.library_browser.loader is None:
+            self._show_placeholder(message)
+        InfoBar.warning("本地版本读取失败", message, parent=self.window(), position=InfoBarPosition.TOP)
+
+    def _refresh_local_outputs(self) -> None:
+        if self.library_browser.root is not None:
+            self._library_refresh_timer.start(0)
 
     def _build_ui(self) -> None:
         root_layout = QVBoxLayout(self)
@@ -576,6 +686,12 @@ class OverviewPage(QWidget):
 
         header_layout.addLayout(title_column)
         header_layout.addStretch(1)
+        header_layout.addWidget(CaptionLabel("浏览版本", self))
+        self.version_combo = ComboBox(self)
+        self.version_combo.setAccessibleName("浏览版本")
+        self.version_combo.setMinimumWidth(220)
+        self.version_combo.addItem("当前客户端", userData=None)
+        header_layout.addWidget(self.version_combo)
         root_layout.addLayout(header_layout)
 
         self.shared_data_status = StatusLine("正在检查实体数据…", self)
@@ -672,6 +788,9 @@ class OverviewPage(QWidget):
 
     def _sync_current_list_view(self) -> None:  # noqa: PLR0911
         """同步当前 tab 的列表显示状态，不重建已有缓存。"""
+        if self.library_browser.loading:
+            self._show_placeholder("正在读取本地版本…")
+            return
         entity_type = self._current_entity_type()
         source_rows = self._entity_data_store.rows_for(entity_type)
         visible_count = self._apply_filter_to_current_list()
@@ -679,7 +798,7 @@ class OverviewPage(QWidget):
         self.entityListPanel.set_current_entity_type(entity_type)
         list_widget = self._current_entity_list()
 
-        if entity_type == "special" and self._app_context is None:
+        if entity_type == "special" and self._browse_context() is None:
             self.entityListPanel.set_special_catalog_notice(None)
             self._set_splitter_sizes_evenly()
             self._show_placeholder("当前特殊内容数据尚未加载完成。")
@@ -690,7 +809,7 @@ class OverviewPage(QWidget):
             if entity_type == "special":
                 self.entityListPanel.set_special_catalog_notice(None)
             self._set_splitter_sizes_evenly()
-            if self._shared_data_state.phase is not SharedDataPhase.READY:
+            if self._shared_data_state.phase is not SharedDataPhase.READY and self.library_browser.selection is None:
                 display = describe_shared_data_state(self._shared_data_state)
                 self._show_placeholder(display.status_text)
                 self._update_selection_summary()
@@ -741,6 +860,9 @@ class OverviewPage(QWidget):
         self._update_selection_summary()
 
     def _update_selection_summary(self) -> None:
+        readonly = self.library_browser.selection is not None
+        self.entityListPanel.selection_bar.setVisible(not readonly)
+        self.entityListPanel.selection_status_label.setVisible(not readonly)
         champion_count = len(self._selected_entity_ids["champions"])
         map_count = len(self._selected_entity_ids["maps"])
         special_count = len(self._selected_entity_ids["special"])
@@ -749,7 +871,9 @@ class OverviewPage(QWidget):
             map_count=map_count,
             special_count=special_count,
         )
-        if self._shared_data_state.blocks_new_tasks:
+        if readonly:
+            self.entityListPanel.set_selection_actions_enabled(False)
+        elif self._shared_data_state.blocks_new_tasks:
             display = describe_shared_data_state(self._shared_data_state)
             self.sync_selection_btn.setEnabled(False)
             self.sync_selection_btn.setToolTip(display.task_block_reason)
@@ -757,6 +881,9 @@ class OverviewPage(QWidget):
             self.sync_selection_btn.setToolTip("")
 
     def _sync_selected_entities(self) -> None:
+        # 本地浏览只能消费已有音频，不能借用当前客户端执行另一版本的实体。
+        if self.library_browser.selection is not None:
+            return
         if self._shared_data_state.blocks_new_tasks:
             display = describe_shared_data_state(self._shared_data_state)
             InfoBar.warning(
@@ -845,6 +972,7 @@ class OverviewPage(QWidget):
             or self._resource_pack_scan_worker is not None
             or self._task_busy
             or self._shared_data_state.active
+            or self.library_browser.selection is not None
         ):
             return
 
@@ -863,30 +991,38 @@ class OverviewPage(QWidget):
     def _on_resource_pack_scan_started(self) -> None:
         """显示资源包扫描中的可观察状态。"""
         self.entityListPanel.set_resource_pack_scan_enabled(False)
-        self.entityListPanel.set_special_catalog_notice("正在从所选 WAD 发现音频内容，完成后可选择并创建解包任务…")
+        if self.library_browser.selection is None:
+            self.entityListPanel.set_special_catalog_notice("正在从所选 WAD 发现音频内容，完成后可选择并创建解包任务…")
 
     def _on_resource_pack_scan_finished(self, result: object) -> None:
         """合并最新已持久化 resource-pack 行，并展示聚合成本与状态。"""
         self._resource_pack_scan_worker = None
         self.background_work_changed.emit(False)
         self.export_controller.set_busy(self._task_busy)
-        self.entityListPanel.set_resource_pack_scan_enabled(self._app_context is not None)
-        loader = self._ensure_loader()
+        self.entityListPanel.set_resource_pack_scan_enabled(
+            self._app_context is not None and self.library_browser.selection is None and not self._task_busy
+        )
+        # 扫描属于当前源；用户可在等待时浏览另一版本，完成结果不能借用浏览 loader。
+        loader = EntityDataLoader(self._app_context) if self._app_context is not None else None
         if loader is not None:
             resource_rows = loader.load_resource_pack_rows()
             structured_rows = [
-                row for row in self._entity_data_store.rows_for("special") if row.get("entity_type") != "resource_packs"
+                row for row in self._source_data_store.rows_for("special") if row.get("entity_type") != "resource_packs"
             ]
             self.set_entity_data("special", [*structured_rows, *resource_rows])
-        self.entityListPanel.set_special_catalog_notice(self._resource_pack_scan_message(result))
+        if self.library_browser.selection is None:
+            self.entityListPanel.set_special_catalog_notice(self._resource_pack_scan_message(result))
 
     def _on_resource_pack_scan_failed(self, error: str) -> None:
         """恢复扫描入口，并保留后台 discovery 的失败说明。"""
         self._resource_pack_scan_worker = None
         self.background_work_changed.emit(False)
         self.export_controller.set_busy(self._task_busy)
-        self.entityListPanel.set_resource_pack_scan_enabled(self._app_context is not None)
-        self.entityListPanel.set_special_catalog_notice(f"本地资源包扫描失败: {error}")
+        self.entityListPanel.set_resource_pack_scan_enabled(
+            self._app_context is not None and self.library_browser.selection is None and not self._task_busy
+        )
+        if self.library_browser.selection is None:
+            self.entityListPanel.set_special_catalog_notice(f"本地资源包扫描失败: {error}")
 
     @staticmethod
     def _resource_pack_scan_message(result: object) -> str:
@@ -1174,11 +1310,12 @@ class OverviewPage(QWidget):
 
     def _configure_audio_export(self, name: str, version: str | None) -> None:
         """从现有领域目录与配置建立当前实体的导出基础快照。"""
-        if self._app_context is None or version is None or not self._current_audio_roots:
+        context = self._browse_context()
+        if context is None or version is None or not self._current_audio_roots:
             self.export_controller.reset()
             return
         # 其他目录刷新可清空 loader；版本必须与本次已通过 token 校验的预览结果一致。
-        region_root = self._app_context.version_path("audio", version).resolve()
+        region_root = context.version_path("audio", version).resolve()
         self.export_controller.configure(
             AudioExportRequest(
                 entity_type=self._current_preview_entity_type or "",
@@ -1189,13 +1326,13 @@ class OverviewPage(QWidget):
                 targets=tuple(
                     ExportTarget(
                         AudioScope(root),
-                        self._app_context.version_path("wav", version),
+                        context.version_path("wav", version),
                     )
                     for root in self._current_audio_roots
                 ),
-                report_root=self._app_context.version_path("report", version),
+                report_root=context.version_path("report", version),
                 region=region_root.name,
-                library_root=Path(self._app_context.config.output_path),
+                library_root=Path(context.config.output_path),
                 options=WavOutputOptions(
                     enabled=True,
                     worker_count=int(getattr(self.gui_config, "wav_workers", 2)),
@@ -1213,12 +1350,26 @@ class OverviewPage(QWidget):
             complete=self._audio_refs_loaded,
         )
 
+    def _submit_audio_export(self, request: AudioExportRequest) -> None:
+        """按已确认的本地文件冻结无清单导出，源任务目录语义保持原样。"""
+        if self.library_browser.selection is not None:
+            files = tuple(ref.path for ref in self._current_audio_refs) if self._audio_refs_loaded else None
+            try:
+                request = freeze_unlisted_export(request, files)
+            except ValueError as exc:
+                InfoBar.warning("暂时无法导出", str(exc), parent=self.window(), position=InfoBarPosition.TOP)
+                return
+        self.audio_export_requested.emit(request)
+
     def set_task_busy(self, busy: bool) -> None:
         """用全局任务忙碌状态阻止重叠导出和资源包扫描。"""
         self._task_busy = busy
         self.export_controller.set_busy(busy or self._resource_pack_scan_worker is not None)
         self.entityListPanel.set_resource_pack_scan_enabled(
-            not busy and self._app_context is not None and self._resource_pack_scan_worker is None
+            not busy
+            and self._app_context is not None
+            and self._resource_pack_scan_worker is None
+            and self.library_browser.selection is None
         )
 
     def _save_audio_wav(self, audio_id: str, wem_path: Path) -> None:
@@ -1252,12 +1403,13 @@ class OverviewPage(QWidget):
     def _reveal_wav(self, wem_path: Path) -> None:
         """转码当前试听音频到默认 WAV 镜像路径并定位文件。"""
         loader = self._ensure_loader()
-        if self._app_context is None or loader is None:
+        context = self._browse_context()
+        if context is None or loader is None:
             return
 
         version = loader.data_reader.version
-        audio_root = self._app_context.version_path("audio", version).resolve()
-        wav_root = self._app_context.version_path("wav", version)
+        audio_root = context.version_path("audio", version).resolve()
+        wav_root = context.version_path("wav", version)
         try:
             wav_path = resolve_wav_path(wem_path, audio_root=audio_root, wav_root=wav_root)
             self.export_controller.export_file(wem_path, wav_path, overwrite=True, reveal=True)
@@ -1552,17 +1704,17 @@ class OverviewPage(QWidget):
 
     def _start_audio_refs_load(self, request: _AudioRefsRequest) -> None:
         """把一次全量 WEM 枚举提交到线程池。"""
-        if self._app_context is None:
+        loader = self._ensure_loader()
+        if loader is None:
             return
 
-        context = self._app_context
         logger.debug("全部音频索引启动：{} {}", request.entity_type, request.entity_id)
         self._audio_refs_request = request
         self._audio_refs_error = None
         self._audio_refs_progress = AudioIndexProgress(current=0, total=0)
         self.export_controller.set_index_error(False)
         self._audio_refs_worker = TaskWorker(
-            lambda signals: EntityDataLoader(context).load_audio_refs(
+            lambda signals: loader.load_audio_refs(
                 request.entity_type,
                 request.entity_id,
                 progress=signals.progress.emit,
@@ -1685,6 +1837,10 @@ class OverviewPage(QWidget):
 
     def _update_catalog_subtitle(self) -> None:
         """按当前一级目录更新总览说明，避免隐藏特殊内容可用性边界。"""
+        selection = self.library_browser.selection
+        if selection is not None:
+            self.subtitle_label.setText(f"正在浏览 {selection.version} 的已有音频，可试听和导出。")
+            return
         entity_type = self._current_entity_type()
         if entity_type == "special" and self._app_context is None:
             self.subtitle_label.setText("正在准备特殊内容数据。")
