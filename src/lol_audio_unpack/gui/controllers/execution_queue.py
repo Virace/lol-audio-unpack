@@ -153,6 +153,11 @@ class ExecutionQueueController(QObject):
         """返回当前是否存在运行中的任务。"""
         return self._active_task_id is not None
 
+    def set_log_level(self, level: int) -> None:
+        """把当前采集等级同步给正在运行的任务进程。"""
+        if self._active_worker is not None:
+            self._active_worker.set_log_level(level)
+
     def has_active_background_work(self) -> bool:
         """返回执行中心是否仍持有运行中的后台任务。"""
         return bool(self._active_task_id is not None or self._active_worker is not None)
