@@ -77,7 +77,7 @@ class LibraryBrowser(QObject):
         self._scan_generation += 1
         token = self._scan_generation
         root = self.root
-        logger.debug("开始发现本地音频版本: {}", root)
+        logger.debug("开始发现本地音频版本")
         worker = TaskWorker(lambda: discover_versions(root))
         key = ("scan", token)
         self._workers[key] = worker
