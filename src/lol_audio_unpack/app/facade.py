@@ -42,6 +42,7 @@ from .artifacts import resolve_audio_paths
 from .preflight import SourcePreflightError, check_source_files
 from .resource_pack import partition_special_targets
 from .results import EntityResult, ResultStatus, StageResult
+from .source_info import log_source_info
 from .special_content import merge_champion_ids
 from .targets import TargetSelectionError, check_ids, with_common_map
 from .types import AppContext, OperationOptions
@@ -144,6 +145,8 @@ class LolAudioUnpackApp:
         self, opts: OperationOptions, *, include_champions: bool = True, include_maps: bool = True
     ) -> None:
         """重新检查本次标准实体与显式资源包，失败发生在任何源处理写入之前。"""
+        # 文件日志已就绪时补记实际源；独立 WAV 等无源任务不依赖客户端配置。
+        log_source_info(self.ctx.config.game_path, self.ctx.game_region, level="DEBUG")
         wads = [ref.identity for ref in opts.resource_pack_wads]
         for key in self._resource_pack_targets(opts):
             payload = self._get_reader().get_resource_pack_banks(key)

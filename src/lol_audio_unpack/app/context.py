@@ -13,6 +13,7 @@ from lol_audio_unpack.config import (
     SUPPORTED_SETTING_KEYS,
     SettingKey,
 )
+from lol_audio_unpack.utils.game_layout import CHAMPIONS_DIR, MAPS_DIR, resolve_layout
 from lol_audio_unpack.utils.runtime_paths import (
     detect_runtime_paths,
     get_default_output_root,
@@ -21,6 +22,7 @@ from lol_audio_unpack.utils.runtime_paths import (
 
 from .local_source import validate_local_source
 from .migration import migrate_library
+from .source_info import log_source_info
 from .types import (
     AppConfig,
     AppContext,
@@ -164,9 +166,9 @@ def _build_paths(app_config: AppConfig) -> AppPaths:
         report_path=report_path,
         manifest_path=manifest_path,
         local_version_file=output_path / "game_version",
-        game_champion_path=game_path / "Game" / "DATA" / "FINAL" / "Champions",
-        game_maps_path=game_path / "Game" / "DATA" / "FINAL" / "Maps" / "Shipping",
-        game_lcu_path=game_path / "LeagueClient" / "Plugins" / "rcp-be-lol-game-data",
+        game_champion_path=game_path / CHAMPIONS_DIR,
+        game_maps_path=game_path / MAPS_DIR,
+        game_lcu_path=resolve_layout(game_path).lcu_path,
     )
 
 
@@ -201,6 +203,7 @@ def create_app_context(  # noqa: PLR0913
     app_config = _build_config(settings=raw_settings, dev_mode=dev_mode)
     if not app_config.game_region and not allow_empty_language:
         raise AppContextValidationError("请选择游戏资源语言")
+    log_source_info(app_config.game_path, app_config.game_region)
     # 旧文件迁移不消费游戏源；没有旧输出时不创建目录。新任务仍须通过下方输入预检。
     migrate_library(
         app_config.output_path, region=app_config.game_region or "en_US", progress_callback=progress_callback

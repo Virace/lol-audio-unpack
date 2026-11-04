@@ -88,6 +88,7 @@ from lol_audio_unpack.gui.view.overview.preview_panel import (
 )
 from lol_audio_unpack.gui.workers import TaskWorker
 from lol_audio_unpack.manager.files import read_data
+from lol_audio_unpack.utils.game_layout import FINAL_DIR
 
 DEFAULT_PREVIEW_AUDIO_VOLUME_PERCENT = 10
 DEFAULT_PREVIEW_AUDIO_OUTPUT_DEVICE_KEY = "default"
@@ -805,7 +806,7 @@ class OverviewPage(QWidget):
             return
 
         game_root = Path(self._app_context.config.game_path)
-        final_root = game_root / "Game" / "DATA" / "FINAL"
+        final_root = game_root / FINAL_DIR
         paths, _ = QFileDialog.getOpenFileNames(
             self,
             "选择本地 WAD，发现额外音频内容（经典英雄无需扫描）",

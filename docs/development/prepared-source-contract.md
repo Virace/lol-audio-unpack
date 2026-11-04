@@ -5,11 +5,21 @@
 
 ## 共享基础预检
 
-- `game_path`、`Game/DATA/FINAL` 和 `LeagueClient/Plugins/rcp-be-lol-game-data` 是可读取目录。
+- `game_path`、`Game/DATA/FINAL` 和选中的 LCU game-data 位置是可读取目录。
+- LCU game-data 位置可以是 `LeagueClient/Plugins/rcp-be-lol-game-data` 或
+  `Plugins/rcp-be-lol-game-data`；同一输入的预检、更新与来源扫描使用相同布局选择规则。
 - `Game/content-metadata.json` 是有效 JSON 对象，并包含非空字符串 `version`。
-- `LeagueClient/Plugins/rcp-be-lol-game-data/description.json` 是有效 JSON 对象，并包含对象类型的
-  `riotMeta`。
+- 选中 LCU 目录中的 `description.json` 是有效 JSON 对象，并包含对象类型的 `riotMeta`。
 - `LeagueClient.exe` 不是合同的一部分，外部准备目录无需复制它。
+
+布局识别优先检查声明文件所在位置，再检查实际 game-data 目录。两套独立声明都存在时拒绝
+混合消费；指向相同真实 game-data 位置的候选去重。选中声明损坏时直接报告原错误，不换用
+另一套资源。没有 LCU 标志时，候选位置仅用于提供缺失诊断，不能代替基础预检。
+
+`system.yaml` 和 `Config/LeagueClientSettings.yaml` 只提供可选诊断，分别读取
+`default_region` 与 `install.globals.region`；它们不属于必需资源，缺失、损坏或地区字段无效
+均不改变输入可用性。日志将客户端声明、来源文件和资源语言分开记录，不由语言或布局猜测
+安装地区，不推断账号实际登录服务器，不输出其他配置字段。
 
 | 校验层 | 资源要求 |
 | --- | --- |

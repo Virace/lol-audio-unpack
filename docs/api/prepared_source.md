@@ -13,10 +13,20 @@
 │  ├─ content-metadata.json
 │  └─ DATA/FINAL/
 │     └─ <所需的 .wad.client>
-└─ LeagueClient/Plugins/rcp-be-lol-game-data/
+└─ <LCU game-data 目录>/
    ├─ description.json
    └─ <description.json 引用的 LCU 资源>
 ```
+
+LCU game-data 目录支持两种实际布局，程序根据本地文件识别：
+
+| 布局 | 相对于游戏根的目录 |
+| --- | --- |
+| 客户端位于独立子目录 | `LeagueClient/Plugins/rcp-be-lol-game-data/` |
+| 客户端位于游戏根 | `Plugins/rcp-be-lol-game-data/` |
+
+两种布局都把 `Game/` 所在目录作为游戏根，无需移动文件。若两套独立 LCU 目录都包含
+`description.json`，程序会报告选择不明确，避免混用两套资源。
 
 | 文件 | 用途 |
 | --- | --- |
@@ -43,6 +53,18 @@
 | 文件存在但解析失败 | 检查获取过程是否完整，保留错误提示和日志 |
 
 `update` 准备的是应用所需的数据，不会补下载缺失的游戏文件。
+
+## 日志中的客户端来源
+
+输入预检前会记录目录布局、安装地区声明、配置地区和所选资源语言：
+
+- 安装地区来自所选客户端 `system.yaml` 的 `default_region`，日志同时记录来源位置。
+- 配置地区来自 `Config/LeagueClientSettings.yaml` 的 `install.globals.region`。
+- 资源语言来自本次选择，与安装地区分别记录。例如安装地区 `TW2` 可以使用 `en_US` 资源。
+
+这些标识用于复现客户端来源问题，不表示账号当前实际登录的具体服务器。目录布局也不用于
+推断服务器。外部准备目录无需提供上述 YAML，缺失或无法读取时记录“未知”，不影响资源预检。
+日志不输出其他安装配置、认证或账号信息。
 
 外部准备工具作者和维护者请查看 [本地数据源验证合同](../development/prepared-source-contract.md)，
 其中保留文件格式、验证阶段、共享资源与旧远程配置迁移的完整约定。

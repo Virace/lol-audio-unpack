@@ -9,10 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote_from_bytes, unquote_to_bytes
 
+from lol_audio_unpack.utils.game_layout import FINAL_DIR
+from lol_audio_unpack.utils.game_resources import WAD_SUFFIX as _WAD_SUFFIX
+
 RESOURCE_PACK_PREFIX = "resource_pack"
 RESOURCE_PACK_ENTITY_TYPE = "resource_pack"
 RESOURCE_PACK_GROUP = "resource_packs"
-_WAD_SUFFIX = ".wad.client"
 _PERCENT_ESCAPE_RE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _WINDOWS_ABSOLUTE_RE = re.compile(r"^[a-zA-Z]:/")
 
@@ -259,7 +261,7 @@ def partition_special_targets(targets: tuple[str, ...] | list[str]) -> SpecialTa
 def _resolve_final_wad(game_root: Path, path: Path) -> Path:
     """解析 WAD 并确认最终目标没有经 symlink 逃出 FINAL。"""
     try:
-        final_root = (game_root / "Game" / "DATA" / "FINAL").resolve(strict=True)
+        final_root = (game_root / FINAL_DIR).resolve(strict=True)
         resolved = path.resolve(strict=True)
         resolved.relative_to(final_root)
     except (OSError, ValueError) as exc:

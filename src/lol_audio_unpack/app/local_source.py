@@ -7,6 +7,15 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from lol_audio_unpack.utils.game_layout import (
+    FINAL_DIR,
+    GAME_METADATA,
+    LCU_DESCRIPTION,
+    LCU_DIRS,
+    GameLayoutError,
+    resolve_layout,
+)
+
 from .types import AppContextValidationError
 
 
@@ -70,19 +79,23 @@ def validate_local_source(game_path: Path) -> None:
     """
     _require_directory(game_path, "根目录")
 
-    game_root = game_path / "Game"
-    final_root = game_root / "DATA" / "FINAL"
-    lcu_root = game_path / "LeagueClient" / "Plugins" / "rcp-be-lol-game-data"
-    _require_directory(final_root, "GAME FINAL 目录")
+    _require_directory(game_path / FINAL_DIR, "GAME FINAL 目录")
+    try:
+        lcu_root = resolve_layout(game_path).lcu_path
+    except GameLayoutError as exc:
+        raise AppContextValidationError(str(exc)) from exc
+    if not lcu_root.exists():
+        locations = "、".join(str(game_path / relative) for relative in LCU_DIRS)
+        raise AppContextValidationError(f"本地数据源缺少LCU game-data 目录，已检查: {locations}")
     _require_directory(lcu_root, "LCU game-data 目录")
 
-    metadata_path = game_root / "content-metadata.json"
+    metadata_path = game_path / GAME_METADATA
     metadata = _read_json_object(metadata_path, "GAME content-metadata.json")
     version = metadata.get("version")
     if not isinstance(version, str) or not version.strip():
         raise AppContextValidationError(f"本地数据源的 GAME 元数据缺少有效 version: {metadata_path}")
 
-    description_path = lcu_root / "description.json"
+    description_path = lcu_root / LCU_DESCRIPTION
     description = _read_json_object(description_path, "LCU description.json")
     if not isinstance(description.get("riotMeta"), Mapping):
         raise AppContextValidationError(f"本地数据源的 LCU description.json 缺少有效 riotMeta: {description_path}")

@@ -61,6 +61,7 @@ from lol_audio_unpack.model import AudioEntityData
 from lol_audio_unpack.model.binding import RESOURCE_SCHEMA_VERSION
 from lol_audio_unpack.model.skin_audio import SKIN_AUDIO_VERSION, SkinAudio
 from lol_audio_unpack.utils.common import sanitize_filename
+from lol_audio_unpack.utils.game_resources import WAD_SUFFIX
 
 if TYPE_CHECKING:
     from lol_audio_unpack.app.types import AppContext
@@ -861,7 +862,7 @@ class EntityDataLoader:
     ) -> str:
         """从 WAD 名恢复不含技术前缀的资源包主展示名。"""
         wad_name = PurePosixPath(wad).name
-        wad_stem = wad_name[: -len(".wad.client")] if wad_name.casefold().endswith(".wad.client") else wad_name
+        wad_stem = wad_name[: -len(WAD_SUFFIX)] if wad_name.casefold().endswith(WAD_SUFFIX) else wad_name
         prefix = profile.prefix
         base_alias = (
             wad_stem[len(prefix) :] if prefix and wad_stem.casefold().startswith(prefix.casefold()) else wad_stem
