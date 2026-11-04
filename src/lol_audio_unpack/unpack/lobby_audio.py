@@ -38,7 +38,13 @@ def find_lobby_audio_source(
     Returns:
         命中的语音文件路径；未找到时返回 ``None``。
     """
-    return find_lobby_source(ctx.version_path("manifest", reader.version), ctx.game_region, champion_id, category)
+    return find_lobby_source(
+        ctx.version_path("manifest", reader.version),
+        ctx.game_region,
+        champion_id,
+        category,
+        champions=reader.data["champions"],
+    )
 
 
 def link_audio(source: Path, target: Path) -> str:
