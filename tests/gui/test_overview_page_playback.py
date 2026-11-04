@@ -11,6 +11,7 @@ from PySide6.QtCore import QPoint, Qt
 
 import lol_audio_unpack.gui.view.overview_page as overview_page_module
 from lol_audio_unpack.app.artifacts import AudioIndexProgress, AudioRef
+from lol_audio_unpack.app.local_library import LibraryVersion
 from lol_audio_unpack.app.resource_pack import ResourcePackWadRef
 from lol_audio_unpack.gui.controllers.overview_preview import (
     ALL_AUDIO_PREVIEW_MODE,
@@ -267,6 +268,35 @@ def test_overview_page_schedules_resource_pack_scan_without_calling_discovery_on
     assert len(scheduled) == 1
     assert scheduled[0] is page._resource_pack_scan_worker
     assert app_calls == []
+
+
+def test_resource_scan_finishing_in_history_updates_only_source_catalog(qtbot, tmp_path, monkeypatch) -> None:
+    """扫描期间切到历史版本后，完成结果只能更新当前源，不能覆盖历史目录或启用扫描。"""
+    page = OverviewPage()
+    qtbot.addWidget(page)
+    source = make_context(tmp_path, runtime_cache={"resolved_runtime_version": "16.18"})
+    page.set_app_context(source)
+    structured = {"id": "60001", "key": "champion:60001", "name": "当前特殊英雄", "entity_type": "champions"}
+    old_pack = {"id": "old", "key": "resource_pack:old", "name": "旧资源包", "entity_type": "resource_packs"}
+    new_pack = {"id": "new", "key": "resource_pack:new", "name": "当前资源包", "entity_type": "resource_packs"}
+    page.set_entity_data("special", [structured])
+    page.library_browser.selection = LibraryVersion("16.17", "zh_CN")
+    page.library_browser.loader = SimpleNamespace(load_resource_pack_rows=lambda: [old_pack])
+    page._on_library_loaded({"special": [old_pack]})
+    contexts = []
+    monkeypatch.setattr(
+        overview_page_module,
+        "EntityDataLoader",
+        lambda context: contexts.append(context) or SimpleNamespace(load_resource_pack_rows=lambda: [new_pack]),
+    )
+
+    page._on_resource_pack_scan_finished(SimpleNamespace(status="success", scans=(), packs=(), cost={}))
+
+    assert contexts == [source]
+    assert page._entity_data_store.rows_for("special") == [old_pack]
+    assert not page.entityListPanel.scan_resource_packs_action.isEnabled()
+    page.library_browser.select(None)
+    assert page._entity_data_store.rows_for("special") == [structured, new_pack]
 
 
 def test_overview_page_reports_audio_scan_and_defers_hidden_model_reset(qtbot) -> None:
@@ -656,6 +686,7 @@ def test_overview_page_unextracted_preview_stays_empty_across_tabs(qtbot, availa
         load_event_audio_refs=lambda *_args: (),
         load_audio_roots=lambda *_args: (),
         _load_preview_entity=lambda *_args, **_kwargs: None,
+        build_audio_resolver=lambda *_args, **_kwargs: lambda _path: None,
         data_reader=SimpleNamespace(version="16.5"),
     )
     loads = []

@@ -11,8 +11,13 @@ from loguru import logger
 
 import lol_audio_unpack.gui.service.data_loader as data_loader_module
 import lol_audio_unpack.gui.service.worker as worker_module
+from lol_audio_unpack.app.local_library import LibraryVersion, discover_versions
+from lol_audio_unpack.app.outputs import save_outputs
 from lol_audio_unpack.app.path_layout import format_entity_folder_name, format_sub_entity_folder_name
+from lol_audio_unpack.app.resource_pack import build_resource_pack_key, resource_pack_path_component
+from lol_audio_unpack.gui.controllers.overview_preview import ALL_AUDIO_PREVIEW_MODE, OverviewPreviewController
 from lol_audio_unpack.gui.service.data_loader import EntityDataLoader, build_scan_failure_result
+from lol_audio_unpack.gui.service.library_loader import LibraryDataLoader
 from lol_audio_unpack.gui.service.worker import SharedDataScanWorker
 from lol_audio_unpack.gui.shared_data import (
     SharedDataProblemCode,
@@ -36,6 +41,119 @@ pytestmark = pytest.mark.unit
 EXPECTED_REQUIRED_COUNT = 2
 FAILING_CHAMPION_ID = 2
 WORKER_GENERATION = 10
+
+
+def test_local_catalog_keeps_metadata_mapping_and_media_in_selected_version(tmp_path: Path) -> None:
+    """同一英雄的不同版本与语言必须使用各自资料，且不依赖客户端。"""
+    selections = (
+        ("16.17", "zh_CN", "旧安妮", "旧事件", "101"),
+        ("16.18", "zh_CN", "新安妮", "新事件", "102"),
+        ("16.17", "en_US", "Annie", "EnglishEvent", "103"),
+    )
+    for version, region, name, event, media_id in selections:
+        write_data(
+            {
+                "metadata": {"gameVersion": version},
+                "champions": {key: {"id": int(key), "names": {region: name}} for key in ("1", "2")},
+                "maps": {"11": {"id": 11}},
+            },
+            tmp_path / "manifest" / version / region / "data",
+        )
+        # 文件内容不参与解码；这里只验证已有产物的所属版本与精确路径。
+        audio = tmp_path / "audios" / version / region / "champions/1·原目录名/1000/VO" / f"{media_id}.wem"
+        audio.parent.mkdir(parents=True)
+        audio.write_bytes(b"path-contract-only")
+        save_outputs(tmp_path, version, region, "champion", "1", [audio])
+        write_data(
+            {
+                "skins": {
+                    "1000": {
+                        "events": {"VO": {event: [media_id]}},
+                        "audioPaths": {"VO": {event: [f"1000/VO/{media_id}.wem"]}},
+                    }
+                }
+            },
+            tmp_path / "hashes" / version / region / "champions/1",
+        )
+
+    write_data({"champions": {}, "maps": {}}, tmp_path / "manifest/16.21/zh_CN/data")
+    (tmp_path / "audios/16.22/zh_CN/champions/1/1000/VO").mkdir(parents=True)
+    assert set(discover_versions(tmp_path)) == {LibraryVersion(version, region) for version, region, *_ in selections}
+    for version, region, name, event, media_id in selections:
+        loader = LibraryDataLoader(tmp_path, LibraryVersion(version, region))
+        rows = loader.load_entities("champions")
+        assert {row["id"] for row in rows} == {"1"}
+        assert loader.load_entities("maps") == []
+        assert next(row["name"] for row in rows if row["id"] == "1") == name
+        mapping_path, mapping, _ = loader.load_mapping_preview("champions", "1")
+        assert mapping_path == tmp_path / "hashes" / version / region / "champions/1.msgpack"
+        assert mapping["skins"]["1000"]["events"] == {"VO": {event: [media_id]}}
+        refs = loader.load_audio_refs("champions", "1")
+        assert tuple(ref.path for ref in refs) == (
+            tmp_path / "audios" / version / region / "champions/1·原目录名/1000/VO" / f"{media_id}.wem",
+        )
+        assert loader.load_event_audio_refs("champions", "1", mapping) == refs
+    assert not (tmp_path / "game").exists()
+
+
+def test_local_audio_without_manifest_or_mapping_remains_browsable(tmp_path: Path) -> None:
+    """缺少历史资料时按稳定 ID 浏览现存音频，不套用新版本名称或映射。"""
+    audio = tmp_path / "audios/16.17/zh_CN/champions/1·原目录名/1000/VO/101.wem"
+    audio.parent.mkdir(parents=True)
+    audio.write_bytes(b"path-contract-only")
+    grouped_audio = tmp_path / "audios/16.17/zh_CN/VO/champions/1/1000/102.wem"
+    grouped_audio.parent.mkdir(parents=True)
+    grouped_audio.write_bytes(b"path-contract-only")
+    pack_key = build_resource_pack_key("Legacy.wad.client", "MODE_LEGACY")
+    pack_audio = tmp_path / "audios/16.17/zh_CN/resource_packs" / resource_pack_path_component(pack_key) / "SFX/201.wem"
+    pack_audio.parent.mkdir(parents=True)
+    pack_audio.write_bytes(b"path-contract-only")
+    map_audio = tmp_path / "audios/16.17/zh_CN/maps/11/SFX/301.wem"
+    map_audio.parent.mkdir(parents=True)
+    map_audio.write_bytes(b"path-contract-only")
+    write_data(
+        {
+            "resourcePack": {
+                "key": pack_key,
+                "wad": "Legacy.wad.client",
+                "namespace": "MODE_LEGACY",
+                "source": {"wad": "Legacy.wad.client", "size": 100, "mtimeNs": 1},
+            }
+        },
+        tmp_path / "manifest/16.17/zh_CN/banks/resource_packs" / resource_pack_path_component(pack_key),
+    )
+    loader = LibraryDataLoader(tmp_path, LibraryVersion("16.17", "zh_CN"))
+
+    assert discover_versions(tmp_path) == (LibraryVersion("16.17", "zh_CN"),)
+    rows = loader.load_entities("champions")
+    assert [(row["id"], row["name"], row["audio"]) for row in rows] == [("1", "1", "已存在")]
+    preview = OverviewPreviewController().load_preview(
+        entity_type="champions", entity_id="1", entity_name="1", loader=loader
+    )
+    assert preview.placeholder_message is None
+    assert preview.default_preview_mode == ALL_AUDIO_PREVIEW_MODE
+    assert preview.mapping_data is None
+    assert tuple(ref.path for ref in loader.load_audio_refs("champions", "1")) == (audio, grouped_audio)
+    mapping = {
+        "skins": {
+            "1000": {
+                "events": {"VO": {"event": ["101", "102"]}},
+                "audioPaths": {"VO": {"event": ["1000/VO/101.wem", "VO/1000/102.wem"]}},
+            }
+        }
+    }
+    assert tuple(ref.path for ref in loader.load_event_audio_refs("champions", "1", mapping)) == (
+        audio,
+        grouped_audio,
+    )
+    packs = loader.load_resource_pack_rows()
+    assert [(row["id"], row["audio"]) for row in packs] == [(pack_key, "已存在")]
+    assert packs[0]["selectable"]
+    assert packs[0]["resource_pack_wad"] is None
+    assert tuple(ref.path for ref in loader.load_audio_refs("resource_packs", pack_key)) == (pack_audio,)
+    maps = loader.load_entities("maps")
+    assert [(row["id"], row["name"], row["audio"]) for row in maps] == [("11", "11", "已存在")]
+    assert tuple(ref.path for ref in loader.load_audio_refs("maps", "11")) == (map_audio,)
 
 
 @pytest.mark.parametrize("require_resources", [False, True])
