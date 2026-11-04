@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from lol_audio_unpack.manager.source_inventory import SourceDiscoveryError, SourceEntity, scan_inventory
+from lol_audio_unpack.utils.game_layout import FINAL_DIR
 
 from .targets import should_hide_champion_by_default
 from .types import AppContext
@@ -45,7 +46,7 @@ def check_source_files(  # noqa: PLR0913
     root = ctx.config.game_path.resolve()
     for relative in resource_wads:
         path = (root / relative).resolve()
-        if not path.is_relative_to(root / "Game" / "DATA" / "FINAL"):
+        if not path.is_relative_to(root / FINAL_DIR):
             raise SourcePreflightError("资源包来源路径不在游戏 FINAL 目录内")
         if not path.is_file():
             missing_packs.append(SourceEntity("resource_pack", relative, Path(relative).name, (relative,), (relative,)))

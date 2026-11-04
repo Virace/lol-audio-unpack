@@ -10,9 +10,15 @@ from pathlib import Path
 from league_tools.formats import WAD
 from loguru import logger
 
-LCU_ROOT = Path("LeagueClient/Plugins/rcp-be-lol-game-data")
-FINAL_ROOT = Path("Game/DATA/FINAL")
-LCU_PREFIX = "plugins/rcp-be-lol-game-data/global/default/v1/"
+from lol_audio_unpack.utils.game_layout import (
+    FINAL_DIR as FINAL_ROOT,
+)
+from lol_audio_unpack.utils.game_layout import GAME_DIR_CHAMPIONS, LCU_DESCRIPTION, LCU_DIRS, MAPS_DIR, resolve_layout
+from lol_audio_unpack.utils.game_resources import RCP_GLOBAL_PREFIX, WAD_SUFFIX
+
+# 保留嵌套布局的既有访问名；当前安装位置由 resolve_layout 按游戏根独立选择。
+LCU_ROOT = LCU_DIRS[0]
+LCU_PREFIX = f"{RCP_GLOBAL_PREFIX}/default/v1/"
 JADE_ID_OFFSET = 60000
 _LOCALE = re.compile(r"\.([a-z]{2}_[a-z]{2})\.wad\.client$", re.IGNORECASE)
 
@@ -81,7 +87,7 @@ class SourceLanguage:
         records = []
         for entity in self.entities:
             for path in entity.missing:
-                if path.startswith(LCU_ROOT.as_posix() + "/"):
+                if any(path.startswith(root.as_posix() + "/") for root in LCU_DIRS):
                     purpose = "LCU 元数据与大厅资源"
                 elif _LOCALE.search(path):
                     purpose = "当前语言语音"
@@ -105,7 +111,7 @@ class SourceInventory:
         return next((item for item in self.languages if item.locale.casefold() == key), None)
 
 
-def _bundle_paths(names: object) -> tuple[str, ...]:
+def _bundle_paths(names: object, lcu_root: Path) -> tuple[str, ...]:
     """拒绝来源声明中的越界路径，转换为游戏根相对身份。"""
     if not isinstance(names, list) or not names:
         raise SourceDiscoveryError("LCU bundle 声明缺失或不是非空列表")
@@ -113,7 +119,7 @@ def _bundle_paths(names: object) -> tuple[str, ...]:
     for name in names:
         if not isinstance(name, str) or not name or Path(name).name != name or name in (".", ".."):
             raise SourceDiscoveryError("LCU bundle 声明含无效文件名")
-        result.append((LCU_ROOT / name).as_posix())
+        result.append((lcu_root / name).as_posix())
     return tuple(dict.fromkeys(result))
 
 
@@ -126,9 +132,10 @@ def read_catalog(game_path: Path) -> tuple[list[dict], list[dict], dict]:
         SourceDiscoveryError: 声明、名单缺失或不能解析。
     """
     try:
-        description = json.loads((game_path / LCU_ROOT / "description.json").read_text(encoding="utf-8-sig"))
+        lcu_root = resolve_layout(game_path).lcu_relative
+        description = json.loads((game_path / lcu_root / LCU_DESCRIPTION).read_text(encoding="utf-8-sig"))
         metadata = description["riotMeta"]
-        bundles = _bundle_paths(metadata.get("globalAssetBundles"))
+        bundles = _bundle_paths(metadata.get("globalAssetBundles"), lcu_root)
         paths = [LCU_PREFIX + "champion-summary.json", LCU_PREFIX + "maps.json"]
         found: dict[str, list] = {}
         for relative in bundles:
@@ -169,7 +176,7 @@ def _wad_paths(folder: str, alias: str, locale: str) -> tuple[str, str]:
     if Path(alias).name != alias or alias in (".", ".."):
         raise SourceDiscoveryError("实体 alias 含无效路径")
     base = FINAL_ROOT / folder / alias
-    return f"{base.as_posix()}.wad.client", f"{base.as_posix()}.{locale}.wad.client"
+    return f"{base.as_posix()}{WAD_SUFFIX}", f"{base.as_posix()}.{locale}{WAD_SUFFIX}"
 
 
 def scan_inventory(game_path: Path, *, generation: int = 0, language: str | None = None) -> SourceInventory:
@@ -186,8 +193,9 @@ def scan_inventory(game_path: Path, *, generation: int = 0, language: str | None
     root = game_path.resolve()
     logger.info("开始本地资源文件扫描，generation={}", generation)
     try:
+        lcu_root = resolve_layout(root).lcu_relative
         champions, maps, metadata = read_catalog(root)
-        common = _bundle_paths(metadata.get("globalAssetBundles"))
+        common = _bundle_paths(metadata.get("globalAssetBundles"), lcu_root)
         declarations = metadata.get("perLocaleAssetBundles", {})
         if not isinstance(declarations, dict):
             raise SourceDiscoveryError("LCU 语言声明不是字典")
@@ -196,7 +204,7 @@ def scan_inventory(game_path: Path, *, generation: int = 0, language: str | None
         locales = {
             locale
             for locale, names in declarations.items()
-            if any((root / path).is_file() for path in _bundle_paths(names))
+            if any((root / path).is_file() for path in _bundle_paths(names, lcu_root))
         }
         if any((root / path).is_file() for path in common):
             locales.add("en_us")
@@ -211,7 +219,11 @@ def scan_inventory(game_path: Path, *, generation: int = 0, language: str | None
             locale = f"{language_code.lower()}_{territory.upper()}"
             diagnostic = ""
             try:
-                bundles = common if locale == "en_US" else common + _bundle_paths(declarations.get(locale.casefold()))
+                bundles = (
+                    common
+                    if locale == "en_US"
+                    else common + _bundle_paths(declarations.get(locale.casefold()), lcu_root)
+                )
             except SourceDiscoveryError as exc:
                 bundles = common
                 diagnostic = str(exc)
@@ -221,7 +233,7 @@ def scan_inventory(game_path: Path, *, generation: int = 0, language: str | None
                 if alias.casefold().startswith(("ruby_", "strawberry_")):
                     # 旧结构化模式只声明独立基础 WAD，没有普通英雄的逐语言文件合同。
                     # 不追加猜测的同名 VO WAD；实际媒体仍经精确 binding 在处理阶段解析。
-                    required = tuple(dict.fromkeys((*bundles, _wad_paths("Champions", alias, locale)[0])))
+                    required = tuple(dict.fromkeys((*bundles, _wad_paths(GAME_DIR_CHAMPIONS, alias, locale)[0])))
                     missing = tuple(path for path in required if not (root / path).is_file())
                     entities.append(
                         SourceEntity("champion", str(item["id"]), item.get("name", alias), required, missing, alias)
@@ -232,15 +244,16 @@ def scan_inventory(game_path: Path, *, generation: int = 0, language: str | None
                     alias = aliases.get(item["id"] - JADE_ID_OFFSET)
                     if not alias:
                         raise SourceDiscoveryError(f"无法确认 Jade {item['id']} 的共享英雄身份")
-                required = tuple(dict.fromkeys((*bundles, *_wad_paths("Champions", alias, locale))))
+                required = tuple(dict.fromkeys((*bundles, *_wad_paths(GAME_DIR_CHAMPIONS, alias, locale))))
                 missing = tuple(path for path in required if not (root / path).is_file())
                 entities.append(
                     SourceEntity("champion", str(item["id"]), item.get("name", alias), required, missing, item["alias"])
                 )
-            common_wads = _wad_paths("Maps/Shipping", "Common", locale)
+            maps_folder = MAPS_DIR.relative_to(FINAL_ROOT).as_posix()
+            common_wads = _wad_paths(maps_folder, "Common", locale)
             for item in maps:
                 alias = "Common" if item["id"] == 0 else f"Map{item['id']}"
-                required = tuple(dict.fromkeys((*bundles, *common_wads, *_wad_paths("Maps/Shipping", alias, locale))))
+                required = tuple(dict.fromkeys((*bundles, *common_wads, *_wad_paths(maps_folder, alias, locale))))
                 missing = tuple(path for path in required if not (root / path).is_file())
                 entities.append(SourceEntity("map", str(item["id"]), item.get("name", alias), required, missing))
             languages.append(SourceLanguage(locale, tuple(entities), diagnostic))

@@ -18,16 +18,18 @@ from lol_audio_unpack.manager.lobby import LOBBY_FILES, find_lobby_source
 from lol_audio_unpack.manager.utils import build_metadata_payload
 from lol_audio_unpack.utils.atomic import replace_file
 from lol_audio_unpack.utils.common import format_region, load_json
+from lol_audio_unpack.utils.game_layout import CHAMPIONS_DIR as CHAMPIONS_REL_PATH
+from lol_audio_unpack.utils.game_layout import LCU_DESCRIPTION
+from lol_audio_unpack.utils.game_layout import MAPS_DIR as MAPS_SHIPPING_REL_PATH
+from lol_audio_unpack.utils.game_resources import RCP_GLOBAL_PREFIX, WAD_SUFFIX
 from lol_audio_unpack.utils.logging import performance_monitor
 from lol_audio_unpack.utils.type_hints import StrPath
 
 if TYPE_CHECKING:
     from lol_audio_unpack.app.types import AppContext
 
-CHAMPIONS_REL_PATH = Path("Game") / "DATA" / "FINAL" / "Champions"
-MAPS_SHIPPING_REL_PATH = Path("Game") / "DATA" / "FINAL" / "Maps" / "Shipping"
+# 未使用，考虑是否删除；当前值仅表示嵌套的 LCU 布局。
 LCU_PLUGIN_REL_PATH = Path("LeagueClient") / "Plugins" / "rcp-be-lol-game-data"
-RCP_GLOBAL_PREFIX = "plugins/rcp-be-lol-game-data/global"
 LOCALIZED_LOBBY_AUDIO_CATEGORIES = ("champion-ban-vo", "champion-choose-vo")
 DEFAULT_LOBBY_AUDIO_CATEGORIES = ("champion-sfx-audios",)
 LOBBY_AUDIO_CATEGORIES = LOCALIZED_LOBBY_AUDIO_CATEGORIES + DEFAULT_LOBBY_AUDIO_CATEGORIES
@@ -125,9 +127,9 @@ class DataUpdater:
         )
         wad_path_base = f"{champions_rel_base}/{alias}"
         return {
-            "root": f"{wad_path_base}.wad.client",
-            "default": f"{wad_path_base}.en_US.wad.client",
-            **{lang: f"{wad_path_base}.{lang}.wad.client" for lang in self.process_languages if lang != "default"},
+            "root": f"{wad_path_base}{WAD_SUFFIX}",
+            "default": f"{wad_path_base}.en_US{WAD_SUFFIX}",
+            **{lang: f"{wad_path_base}.{lang}{WAD_SUFFIX}" for lang in self.process_languages if lang != "default"},
         }
 
     def _build_map_wad_info(self, wad_prefix: str) -> dict[str, str]:
@@ -138,9 +140,9 @@ class DataUpdater:
         )
         wad_path_base = f"{maps_rel_base}/{wad_prefix}"
         return {
-            "root": f"{wad_path_base}.wad.client",
-            "default": f"{wad_path_base}.en_US.wad.client",
-            **{lang: f"{wad_path_base}.{lang}.wad.client" for lang in self.process_languages if lang != "default"},
+            "root": f"{wad_path_base}{WAD_SUFFIX}",
+            "default": f"{wad_path_base}.en_US{WAD_SUFFIX}",
+            **{lang: f"{wad_path_base}.{lang}{WAD_SUFFIX}" for lang in self.process_languages if lang != "default"},
         }
 
     @staticmethod
@@ -158,7 +160,7 @@ class DataUpdater:
         Returns:
             bundle 文件名列表；解析失败时返回空列表。
         """
-        description_file = self._get_game_lcu_path() / "description.json"
+        description_file = self._get_game_lcu_path() / LCU_DESCRIPTION
         if not description_file.exists():
             logger.warning(f"未找到 description.json，无法按清单解析资源: {description_file}")
             return []

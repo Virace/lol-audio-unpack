@@ -6,18 +6,30 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from loguru import logger
+
 from lol_audio_unpack.app.game_version import get_game_version
+from lol_audio_unpack.utils.game_layout import (
+    CHAMPIONS_DIR,
+    GAME_DIR,
+    GAME_EXE,
+    GAME_METADATA,
+    LCU_CLIENT_DIRS,
+    LCU_DIRS,
+    LCU_EXE,
+    MAPS_DIR,
+    GameLayoutError,
+    resolve_layout,
+)
 
 GamePathResultReason = Literal["resolved", "not_found", "ambiguous"]
 
 _MAX_ANCESTORS = 8
 _MAX_SHALLOW_CHILDREN = 80
-_FIXED_SUFFIXES = (
-    ("game",),
-    ("leagueclient",),
-    ("leagueclient", "plugins", "rcp-be-lol-game-data"),
-    ("game", "data", "final", "champions"),
-    ("game", "data", "final", "maps", "shipping"),
+_FIXED_SUFFIXES = tuple(
+    tuple(part.lower() for part in relative.parts)
+    for relative in (GAME_DIR, *LCU_CLIENT_DIRS, *LCU_DIRS, CHAMPIONS_DIR, MAPS_DIR)
+    if relative.parts
 )
 
 
@@ -129,13 +141,21 @@ def _marker_score(root: Path) -> tuple[int, tuple[str, ...]]:
     """统计候选根目录的佐证标志。"""
 
     checks = (
-        ("content-metadata", root / "Game" / "content-metadata.json"),
-        ("game-binary", root / "Game" / "League of Legends.exe"),
-        ("lcu-binary", root / "LeagueClient" / "LeagueClient.exe"),
-        ("lcu-game-data", root / "LeagueClient" / "Plugins" / "rcp-be-lol-game-data"),
-        ("champions-data", root / "Game" / "DATA" / "FINAL" / "Champions"),
-        ("maps-data", root / "Game" / "DATA" / "FINAL" / "Maps" / "Shipping"),
+        ("content-metadata", root / GAME_METADATA),
+        ("game-binary", root / GAME_EXE),
+        ("champions-data", root / CHAMPIONS_DIR),
+        ("maps-data", root / MAPS_DIR),
     )
+    try:
+        layout = resolve_layout(root)
+    except GameLayoutError as exc:
+        # GAME 元数据仍可识别根目录；LCU 歧义由后续核心预检报告。
+        logger.debug("游戏目录的 LCU 标志不明确: {}", exc)
+    else:
+        checks += (
+            ("lcu-binary", layout.client_root / LCU_EXE),
+            ("lcu-game-data", layout.lcu_path),
+        )
     markers = tuple(name for name, path in checks if path.exists())
     return 100 + len(markers), markers
 
@@ -164,7 +184,7 @@ def _shallow_children(path: Path) -> tuple[Path, ...]:
         return ()
 
     for child in children[:_MAX_SHALLOW_CHILDREN]:
-        if (child / "Game").exists() or (child / "LeagueClient").exists():
+        if (child / GAME_DIR).exists() or any((child / relative).exists() for relative in LCU_DIRS):
             _append_unique(roots, child)
 
     return tuple(roots)

@@ -22,6 +22,8 @@ from lol_audio_unpack.model.binding import (
     normalize_logical_path,
     normalize_wad_identity,
 )
+from lol_audio_unpack.utils.game_layout import FINAL_DIR
+from lol_audio_unpack.utils.game_resources import WAD_SUFFIX
 
 _LOCALE_WAD_RE = re.compile(r"\.[a-z]{2}_[a-z]{2}\.wad\.client$", re.IGNORECASE)
 
@@ -186,14 +188,14 @@ class WadIndex:
 
     def _discover_wads(self) -> tuple[list[Path], list[Path]]:
         """只枚举本地 FINAL 下的 root 与当前语言 WAD。"""
-        final_root = self.game_root / "Game" / "DATA" / "FINAL"
+        final_root = self.game_root / FINAL_DIR
         if not final_root.is_dir():
             return [], []
 
         root_wads: list[Path] = []
         localized_wads: list[Path] = []
-        localized_suffix = f".{self.region}.wad.client".casefold()
-        for path in final_root.rglob("*.wad.client"):
+        localized_suffix = f".{self.region}{WAD_SUFFIX}".casefold()
+        for path in final_root.rglob(f"*{WAD_SUFFIX}"):
             name = path.name.casefold()
             if name.endswith(localized_suffix):
                 localized_wads.append(path)
