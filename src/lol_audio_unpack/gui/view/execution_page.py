@@ -58,6 +58,7 @@ from lol_audio_unpack.gui.view.execution.selection_conflict_dialog import (
     ask_selection_conflict_resolution,
 )
 from lol_audio_unpack.gui.view.execution.task_creation_card import TaskCreationCard
+from lol_audio_unpack.utils.logging import get_log_level
 
 
 class ExecutionPage(SmoothScrollArea):
@@ -263,8 +264,9 @@ class ExecutionPage(SmoothScrollArea):
         self._sync_primary_action_button()
 
     def attach_runtime_log_sink(self, level: str = "INFO") -> None:
-        """重新挂载 GUI 运行时日志 sink。"""
+        """重新挂载 GUI 日志 sink，并同步任务进程的采集等级。"""
         self._log_controller.attach_runtime_log_sink(level)
+        self._queue_controller.set_log_level(get_log_level())
 
     def _log_gui_event(self, level: str, message: str) -> None:
         """通过 loguru 记录执行中心的界面交互日志。"""
@@ -342,7 +344,6 @@ class ExecutionPage(SmoothScrollArea):
             current_modes=current_modes,
         )
         if update is None:
-            self._log_gui_event("info", "[同步] 已取消从实体总览同步选择。")
             return None
 
         self.taskBuilderPanel.apply_selected_entities(
@@ -355,7 +356,6 @@ class ExecutionPage(SmoothScrollArea):
             special_target_names=update.special_target_names,
             resource_pack_wads=update.resource_pack_wads,
         )
-        self._log_gui_event("info", f"[同步] {update.summary}")
         return update.summary
 
     def is_task_running(self) -> bool:

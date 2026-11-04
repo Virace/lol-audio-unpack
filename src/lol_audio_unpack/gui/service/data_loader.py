@@ -61,6 +61,7 @@ from lol_audio_unpack.model import AudioEntityData
 from lol_audio_unpack.model.binding import RESOURCE_SCHEMA_VERSION
 from lol_audio_unpack.model.skin_audio import SKIN_AUDIO_VERSION, SkinAudio
 from lol_audio_unpack.utils.common import sanitize_filename
+from lol_audio_unpack.utils.game_resources import WAD_SUFFIX
 
 if TYPE_CHECKING:
     from lol_audio_unpack.app.types import AppContext
@@ -630,6 +631,12 @@ class EntityDataLoader:
             for champion in champions
             if not is_structured_special_champion(champion) and not should_hide_champion_by_default(champion)
         ]
+        special_count = sum(is_structured_special_champion(champion) for champion in champions)
+        hidden_count = len(champions) - len(ordinary_champions) - special_count
+        logger.debug(
+            f"目录分区：英雄元数据={len(champions)}，普通可选={len(ordinary_champions)}，"
+            f"特殊英雄={special_count}，隐藏普通英雄={hidden_count}"
+        )
         champion_result = self._scan_required_section(
             "champions",
             ordinary_champions,
@@ -694,7 +701,7 @@ class EntityDataLoader:
         if self._first_scan_unexpected is not None:
             logger.opt(exception=self._first_scan_unexpected).error(log_message)
         elif result.readiness is SharedDataReadiness.COMPLETE or result.all_blocking_problems_repairable:
-            logger.info(log_message)
+            logger.debug(log_message)
         else:
             logger.warning(log_message)
         return result
@@ -861,7 +868,7 @@ class EntityDataLoader:
     ) -> str:
         """从 WAD 名恢复不含技术前缀的资源包主展示名。"""
         wad_name = PurePosixPath(wad).name
-        wad_stem = wad_name[: -len(".wad.client")] if wad_name.casefold().endswith(".wad.client") else wad_name
+        wad_stem = wad_name[: -len(WAD_SUFFIX)] if wad_name.casefold().endswith(WAD_SUFFIX) else wad_name
         prefix = profile.prefix
         base_alias = (
             wad_stem[len(prefix) :] if prefix and wad_stem.casefold().startswith(prefix.casefold()) else wad_stem

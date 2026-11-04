@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from io import StringIO
 from pathlib import Path
+
+from loguru import logger
 
 import lol_audio_unpack.utils.logging as logging_module
 
@@ -60,3 +63,32 @@ def test_setup_logging_accepts_explicit_log_file_path(
     )
 
     assert add_calls[1][0] == explicit_log_file
+
+
+def test_roots_are_confirmed_once_and_messages_use_relative_paths(tmp_path, monkeypatch) -> None:
+    """根目录确认后，控制台和文件正文使用可定位的相对路径。"""
+    game = tmp_path / "game"
+    output = tmp_path / "output"
+    monkeypatch.setattr(logging_module.LoggingConfiguration, "paths", ())
+    monkeypatch.setattr(logging_module.LoggingConfiguration, "path_patterns", ())
+    console = StringIO()
+    monkeypatch.setattr(logging_module.sys, "stderr", console)
+    log_file = tmp_path / "session.log"
+    logger.enable("lol_audio_unpack")
+    logging_module.setup_logging(log_file_path=log_file, show_function_info=False)
+    try:
+        logging_module.log_paths(game, output)
+        logging_module.log_paths(game, output)
+        logger.info("读取：{}", game / "Game" / "content-metadata.json")
+        logger.debug("写入：{}", output / "hashes" / "4.msgpack")
+        logger.complete()
+        text = log_file.read_text(encoding="utf-8")
+    finally:
+        logger.remove()
+
+    assert text.count(str(game)) == 1
+    assert text.count(str(output)) == 1
+    assert str(Path("Game") / "content-metadata.json") in text
+    assert str(Path("hashes") / "4.msgpack") in text
+    assert "hashes" not in console.getvalue()
+    assert str(game / "Game") not in console.getvalue()

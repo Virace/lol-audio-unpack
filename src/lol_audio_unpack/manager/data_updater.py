@@ -13,21 +13,24 @@ from league_tools.formats import WAD
 from loguru import logger
 
 from lol_audio_unpack.app.game_version import resolve_game_version
+from lol_audio_unpack.app.special_content import get_prime_champion_id
 from lol_audio_unpack.manager.files import copy_file_atomic, needs_update, read_data, write_data
-from lol_audio_unpack.manager.lobby import LOBBY_FILES, find_lobby_source
+from lol_audio_unpack.manager.lobby import LOBBY_FILES, find_lobby_file
 from lol_audio_unpack.manager.utils import build_metadata_payload
 from lol_audio_unpack.utils.atomic import replace_file
 from lol_audio_unpack.utils.common import format_region, load_json
+from lol_audio_unpack.utils.game_layout import CHAMPIONS_DIR as CHAMPIONS_REL_PATH
+from lol_audio_unpack.utils.game_layout import LCU_DESCRIPTION
+from lol_audio_unpack.utils.game_layout import MAPS_DIR as MAPS_SHIPPING_REL_PATH
+from lol_audio_unpack.utils.game_resources import RCP_GLOBAL_PREFIX, WAD_SUFFIX
 from lol_audio_unpack.utils.logging import performance_monitor
 from lol_audio_unpack.utils.type_hints import StrPath
 
 if TYPE_CHECKING:
     from lol_audio_unpack.app.types import AppContext
 
-CHAMPIONS_REL_PATH = Path("Game") / "DATA" / "FINAL" / "Champions"
-MAPS_SHIPPING_REL_PATH = Path("Game") / "DATA" / "FINAL" / "Maps" / "Shipping"
+# 未使用，考虑是否删除；当前值仅表示嵌套的 LCU 布局。
 LCU_PLUGIN_REL_PATH = Path("LeagueClient") / "Plugins" / "rcp-be-lol-game-data"
-RCP_GLOBAL_PREFIX = "plugins/rcp-be-lol-game-data/global"
 LOCALIZED_LOBBY_AUDIO_CATEGORIES = ("champion-ban-vo", "champion-choose-vo")
 DEFAULT_LOBBY_AUDIO_CATEGORIES = ("champion-sfx-audios",)
 LOBBY_AUDIO_CATEGORIES = LOCALIZED_LOBBY_AUDIO_CATEGORIES + DEFAULT_LOBBY_AUDIO_CATEGORIES
@@ -76,11 +79,6 @@ class DataUpdater:
 
         self.version_manifest_path.mkdir(parents=True, exist_ok=True)
 
-        # 记录初始化信息
-        logger.debug(
-            f"DataUpdater 初始化完成 - 版本: {self.version}, 语言: {self.process_languages}, 强制更新: {force_update}"
-        )
-
     def _prepare_language_list(self, languages: list[str]) -> list[str]:
         """准备处理语言列表，确保default在列表中"""
         process_languages = ["default"]
@@ -125,9 +123,9 @@ class DataUpdater:
         )
         wad_path_base = f"{champions_rel_base}/{alias}"
         return {
-            "root": f"{wad_path_base}.wad.client",
-            "default": f"{wad_path_base}.en_US.wad.client",
-            **{lang: f"{wad_path_base}.{lang}.wad.client" for lang in self.process_languages if lang != "default"},
+            "root": f"{wad_path_base}{WAD_SUFFIX}",
+            "default": f"{wad_path_base}.en_US{WAD_SUFFIX}",
+            **{lang: f"{wad_path_base}.{lang}{WAD_SUFFIX}" for lang in self.process_languages if lang != "default"},
         }
 
     def _build_map_wad_info(self, wad_prefix: str) -> dict[str, str]:
@@ -138,9 +136,9 @@ class DataUpdater:
         )
         wad_path_base = f"{maps_rel_base}/{wad_prefix}"
         return {
-            "root": f"{wad_path_base}.wad.client",
-            "default": f"{wad_path_base}.en_US.wad.client",
-            **{lang: f"{wad_path_base}.{lang}.wad.client" for lang in self.process_languages if lang != "default"},
+            "root": f"{wad_path_base}{WAD_SUFFIX}",
+            "default": f"{wad_path_base}.en_US{WAD_SUFFIX}",
+            **{lang: f"{wad_path_base}.{lang}{WAD_SUFFIX}" for lang in self.process_languages if lang != "default"},
         }
 
     @staticmethod
@@ -158,7 +156,7 @@ class DataUpdater:
         Returns:
             bundle 文件名列表；解析失败时返回空列表。
         """
-        description_file = self._get_game_lcu_path() / "description.json"
+        description_file = self._get_game_lcu_path() / LCU_DESCRIPTION
         if not description_file.exists():
             logger.warning(f"未找到 description.json，无法按清单解析资源: {description_file}")
             return []
@@ -227,7 +225,7 @@ class DataUpdater:
             return text
         return text.replace("\u00a0", " ")
 
-    @performance_monitor(level="INFO")
+    @performance_monitor(level="TRACE")
     def check_and_update(self) -> Path:
         """检查游戏版本并更新数据"""
         if (
@@ -236,24 +234,23 @@ class DataUpdater:
         ):
             if self._is_lobby_audio_enabled():
                 self.ensure_lobby_audio(read_data(self.data_file_base).get("champions", {}))
-            logger.info(f"数据文件已是最新版本 {self.version} 且包含所有请求的语言，无需更新。")
             # 返回基础路径，让调用者决定使用哪个具体文件
             return self.data_file_base
 
         run_temp_path = self.temp_path / f"update_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
         run_temp_path.mkdir(parents=True, exist_ok=True)
-        logger.debug(f"创建临时目录用于解包: {run_temp_path}")
+        logger.trace(f"创建临时目录用于解包: {run_temp_path}")
 
         try:
             self._process_data(run_temp_path)
             # 日志展示已经完成发布的固定格式路径。
-            logger.success(f"数据更新完成: {self.data_file_base.with_suffix('.msgpack')}")
+            logger.info(f"基础实体数据已保存: {self.data_file_base.with_suffix('.msgpack')}")
             return self.data_file_base
         finally:
             if not self._is_dev_mode():
                 try:
                     shutil.rmtree(run_temp_path)
-                    logger.debug(f"已清理临时目录: {run_temp_path}")
+                    logger.trace(f"已清理临时目录: {run_temp_path}")
                 except OSError:
                     # 使用现代的异常记录方式
                     logger.opt(exception=True).error(f"清理临时目录失败: {run_temp_path}")
@@ -261,39 +258,64 @@ class DataUpdater:
                 logger.warning(f"开发模式，临时目录未删除: {run_temp_path}")
 
     def ensure_lobby_audio(self, champion_ids: Iterable[str | int]) -> None:
-        """只补齐指定英雄缺少的大厅文件，独立于共享元数据是否已更新。"""
+        """补齐指定英雄可用的大厅源文件，自身缺失时复用关联原英雄。"""
+        champions = read_data(self.data_file_base).get("champions", {})
         pending = {}
         for champion_id in champion_ids:
+            key = str(champion_id)
+            prime_id = get_prime_champion_id(champions.get(key, {}))
             for category in LOBBY_FILES:
-                if find_lobby_source(self.version_manifest_path, self.ctx.game_region, str(champion_id), category):
+                if find_lobby_file(self.version_manifest_path, self.ctx.game_region, key, category):
                     continue
                 region = self.ctx.game_region
                 if category == "champion-sfx-audios" or region.lower() in {"default", "en_us"}:
                     region = "default"
-                pending.setdefault(region, []).append((category, str(champion_id)))
+                pending.setdefault(region, []).append((category, key, prime_id))
         if not pending:
             return
-        logger.info("开始补齐大厅音频：{}，{} 个目标文件", self.version, sum(map(len, pending.values())))
         try:
+            planned = {}
             for region, entries in pending.items():
-                paths = [self._build_rcp_v1_path(region, f"{category}/{key}.ogg") for category, key in entries]
-
-                for wad in self._resolve_wad_files(region, format_region(region)):
-                    for path, data in zip(paths, WAD(wad).extract(paths, raw=True), strict=True):
-                        if data is None:
+                wads = {path: WAD(path) for path in self._resolve_wad_files(region, format_region(region))}
+                sources = {entry.path_hash: path for path, wad in wads.items() for entry in wad.files}
+                missing = {}
+                for category, key, prime_id in entries:
+                    path = self._build_rcp_v1_path(region, f"{category}/{key}.ogg")
+                    wad_file = sources.get(WAD.get_hash(path))
+                    if wad_file is None and prime_id is not None:
+                        if find_lobby_file(self.version_manifest_path, region, str(prime_id), category):
                             continue
-                        category, filename = path.rsplit("/", 2)[-2:]
-                        target = self.version_manifest_path / "lobby" / region / category / filename
-                        replace_file(target, lambda temp, payload=data: temp.write_bytes(payload), write_stage="lobby")
-            missing = sum(
-                find_lobby_source(self.version_manifest_path, self.ctx.game_region, key, category) is None
-                for entries in pending.values()
-                for category, key in entries
-            )
-            if missing:
-                logger.warning("大厅音频补齐结束：源资源中仍缺少 {} 个目标文件", missing)
+                        path = self._build_rcp_v1_path(region, f"{category}/{prime_id}.ogg")
+                        wad_file = sources.get(WAD.get_hash(path))
+                    if wad_file is None:
+                        missing.setdefault(category, []).append(f"{key} → {prime_id}" if prime_id is not None else key)
+                        continue
+                    # 缓存按实际源 ID 保存，避免共享文件占用以后新增的独立资源位置。
+                    planned.setdefault((region, wad_file, wads[wad_file]), set()).add(path)
+                for category, keys in missing.items():
+                    logger.debug("大厅源资源未找到：语言={}，分类={}，英雄={}", region, category, ",".join(keys))
+            if not planned:
+                return
+
+            total = sum(map(len, planned.values()))
+            logger.info("开始补齐大厅音频：{}，{} 个源文件", self.version, total)
+            saved = 0
+            for (region, wad_file, wad), candidates in planned.items():
+                paths = sorted(candidates)
+                bundle = wad_file.relative_to(self.game_path)
+                logger.debug("提取大厅音频：资源包={}，源文件={}", bundle, len(paths))
+                for path, data in zip(paths, wad.extract(paths, raw=True), strict=True):
+                    if data is None:
+                        logger.debug("大厅音频条目提取失败：资源包={}，条目={}", bundle, path)
+                        continue
+                    category, filename = path.rsplit("/", 2)[-2:]
+                    target = self.version_manifest_path / "lobby" / region / category / filename
+                    replace_file(target, lambda temp, payload=data: temp.write_bytes(payload), write_stage="lobby")
+                    saved += 1
+            if saved == total:
+                logger.info("大厅音频补齐完成：{} 个源文件", saved)
             else:
-                logger.success("大厅音频补齐完成：{} 个文件", sum(map(len, pending.values())))
+                logger.warning("大厅音频补齐结束：新增 {}，提取失败 {}", saved, total - saved)
         except Exception:
             logger.exception("大厅音频补齐失败：{}", self.version)
             raise
@@ -329,15 +351,15 @@ class DataUpdater:
         logger.info(f"需要更新数据文件，缺少语言: {missing_languages}")
         return False
 
-    @performance_monitor(level="DEBUG")
+    @performance_monitor(level="TRACE")
     def _process_data(self, temp_path: Path) -> None:
         """处理游戏数据，包括提取、合并和验证"""
 
         for language in self.process_languages:
-            logger.info(f"正在处理 {language} 语言数据...")
+            logger.info("正在提取英雄与地图信息（{}）……", "基础资源" if language == "default" else language)
             self._extract_wad_data(temp_path, language)
 
-        logger.info("合并多语言数据...")
+        logger.debug("开始合并已提取的多语言数据")
         self._merge_and_build_data(temp_path)
 
         if self._is_lobby_audio_enabled():
@@ -353,7 +375,7 @@ class DataUpdater:
         else:
             raise FileNotFoundError(f"未能创建合并数据文件: {source_file}")
 
-    @performance_monitor(level="DEBUG")
+    @performance_monitor(level="TRACE")
     def _persist_lobby_audio_files(self, temp_path: Path) -> None:
         """将临时目录中的大厅音频持久化到 manifest 目录。"""
         temp_version_path = temp_path / self.version
@@ -395,7 +417,7 @@ class DataUpdater:
         logger.trace(f"多语言JSON加载完成，共 {len(loaded_data)} 种语言")
         return loaded_data
 
-    @performance_monitor(level="DEBUG")
+    @performance_monitor(level="TRACE")
     def _merge_and_build_data(self, temp_dir: Path) -> None:
         """聚合所有数据处理和合并逻辑"""
         base_path = temp_dir / self.version
@@ -492,6 +514,8 @@ class DataUpdater:
                 "skins": processed_skins,
                 "wad": self._build_champion_wad_info(alias),
             }
+            if default_details.get("relatedPrimeItemId") is not None:
+                final_champions[champ_id]["relatedPrimeItemId"] = default_details["relatedPrimeItemId"]
 
         final_result = build_metadata_payload(
             self.version, [lang for lang in self.process_languages if lang != "default"]
@@ -505,7 +529,7 @@ class DataUpdater:
         )
 
         # 记录英雄处理完成统计
-        logger.success(f"英雄数据合并完成，共处理 {len(final_champions)} 个英雄")
+        logger.info(f"英雄数据合并完成，共处理 {len(final_champions)} 个英雄")
 
         logger.info("合并地图数据并装配 bin 元数据...")
         maps_by_lang = self._load_language_json(base_path, "maps.json")
@@ -549,7 +573,7 @@ class DataUpdater:
             logger.debug(f"地图 bin 元数据装配完成，共 {map_bin_count} 个地图 binPath")
 
             # 记录地图处理完成统计
-            logger.success(f"地图数据合并完成，共处理 {len(final_maps)} 个地图")
+            logger.info(f"地图数据合并完成，共处理 {len(final_maps)} 个地图")
         else:
             logger.warning("未找到default语言的地图数据，跳过处理。")
 
@@ -557,13 +581,13 @@ class DataUpdater:
         write_data(final_result, base_path / "data", dev_mode=self._is_dev_mode())
 
         # 记录最终处理完成统计
-        logger.success(
+        logger.debug(
             f"数据合并完成 - 英雄: {len(final_result.get('champions', {}))}, "
             f"地图: {len(final_result.get('maps', {}))}, "
             f"语言: {len(self.process_languages)}"
         )
 
-    @performance_monitor(level="DEBUG")
+    @performance_monitor(level="TRACE")
     def _extract_wad_data(self, out_dir: StrPath, region: str) -> None:
         """从WAD文件提取JSON数据"""
         out_path = Path(out_dir) / self.version / region
@@ -613,7 +637,7 @@ class DataUpdater:
                     logger.trace(f"从 {wad_file.name} 提取英雄详细信息")
                     WAD(wad_file).extract(champion_hashes, output_file_name)
 
-                logger.success(f"英雄信息提取完成，共 {len(champion_hashes)} 个英雄，将进入 bin 元数据装配")
+                logger.info(f"英雄信息提取完成，共 {len(champion_hashes)} 个英雄，将进入 bin 元数据装配")
 
                 if self._is_lobby_audio_enabled():
                     lobby_audio_hashes: list[str] = []

@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from loguru import logger
 
-from lol_audio_unpack.app.context import create_app_context
+from lol_audio_unpack.app.context import KNOWN_AUDIO_TYPES, create_app_context
 from lol_audio_unpack.app.facade import LolAudioUnpackApp
 from lol_audio_unpack.app.game_version import resolve_game_version
 from lol_audio_unpack.app.operation_report import write_operation_report
@@ -170,17 +170,6 @@ def _build_run_summary(
     if result.status is ResultStatus.CANCELLED:
         return f"已取消：{stage_text}（{duration}）"
     return f"执行失败：{stage_text}（{duration}）"
-
-
-def _log_run_result(task_id: int, result: RunResult, summary: str) -> None:
-    """按 typed status 记录一次 GUI 任务终态。"""
-    message = f"[执行中心] 任务 #{task_id} {summary}"
-    if result.status is ResultStatus.SUCCESS:
-        logger.success(message)
-    elif result.status in {ResultStatus.PARTIAL, ResultStatus.CANCELLED}:
-        logger.warning(message)
-    else:
-        logger.error(message)
 
 
 def _require_stage_result(result: StageResult | None, stage_key: str) -> StageResult:
@@ -439,7 +428,6 @@ def _run_audio_export(task: QueuedExecutionTask, signals: WorkerSignals) -> Exec
         logger.error("任务报告保存失败，保留已完成音频与内存结果：{}", exc)
         result = RunResult((*result.stages, StageResult.from_error("report", exc)))
         summary += f"；报告保存失败：{exc}"
-    _log_run_result(task.task_id, result, summary)
     return ExecutionTaskResult(
         ("音频转码",) if success or any(batch.output_count for batch in batches) else (),
         summary,
@@ -554,17 +542,25 @@ def run_execution_task(task: QueuedExecutionTask, signals: WorkerSignals) -> Exe
     _validate_special_targets(task)
 
     try:
-        logger.info(f"[执行中心] 任务 #{task.task_id} 开始执行: {' -> '.join(steps)}")
-        logger.debug(f"[执行中心] 任务 #{task.task_id} 范围={task_scope_label}")
-        logger.debug(f"[执行中心] 任务 #{task.task_id} 共享上下文快照={task.draft.context_input.to_settings()}")
-        logger.debug(
-            f"[执行中心] 任务 #{task.task_id} 参数快照 "
-            f"task_params={asdict(task_params)}, runtime_settings={runtime_settings}, options={asdict(options)}"
-        )
+        details = []
+        for label, ids, included in (
+            ("英雄", options.champion_ids, include_champions),
+            ("地图", options.map_ids, include_maps),
+        ):
+            if included and ids != ():
+                details.append(f"{label}={'全部' if ids is None else ','.join(map(str, ids))}")
+        if options.special_targets:
+            details.append(f"特殊内容={','.join(options.special_targets)}")
+        details.append("音频=" + ",".join(kind for kind in KNOWN_AUDIO_TYPES if kind not in task_params.exclude_types))
+        details.append(f"并发={options.max_workers}")
+        if task_params.run_mapping:
+            details.append("映射=" + ("整合" if options.integrate_data else "普通"))
+        if options.wav_output.enabled:
+            details.append(f"WAV={options.wav_output.format}，并发={options.wav_output.worker_count}")
+        logger.debug(f"任务 #{task.task_id} 参数：{'；'.join(details)}")
         for step_name in steps:
             stage_key = STAGE_KEY_BY_STEP_NAME.get(step_name, "unknown")
             stage_result: StageResult | None = None
-            logger.info(f"[执行中心] 任务 #{task.task_id} 开始{step_name}")
 
             if step_name in {"准备任务数据", "前置强制更新"}:
 
@@ -614,7 +610,6 @@ def run_execution_task(task: QueuedExecutionTask, signals: WorkerSignals) -> Exe
                     )
 
                 if runtime_app is None:
-                    logger.debug(f"[执行中心] 任务 #{task.task_id} 创建运行时 AppContext")
                     runtime_app = create_runtime_app(runtime_settings)
                 if not map_banks_checked:
                     _ensure_map_banks_ready(runtime_app, task, include_maps=include_maps)
@@ -668,7 +663,6 @@ def run_execution_task(task: QueuedExecutionTask, signals: WorkerSignals) -> Exe
                     )
 
                 if runtime_app is None:
-                    logger.debug(f"[执行中心] 任务 #{task.task_id} 创建运行时 AppContext")
                     runtime_app = create_runtime_app(runtime_settings)
 
                 if options.wav_output.group_by_event:
@@ -711,7 +705,6 @@ def run_execution_task(task: QueuedExecutionTask, signals: WorkerSignals) -> Exe
                     )
 
                 if runtime_app is None:
-                    logger.debug(f"[执行中心] 任务 #{task.task_id} 创建运行时 AppContext")
                     runtime_app = create_runtime_app(runtime_settings)
                 if not map_banks_checked:
                     _ensure_map_banks_ready(runtime_app, task, include_maps=include_maps)
@@ -782,7 +775,6 @@ def run_execution_task(task: QueuedExecutionTask, signals: WorkerSignals) -> Exe
     duration_seconds = perf_counter() - started_at
     completed_step_names = tuple(completed_steps)
     summary = _build_run_summary(run_result, completed_step_names, duration_seconds)
-    _log_run_result(task.task_id, run_result, summary)
     wav_batches = tuple(batch for stage in stage_results for batch in stage.wav_batches)
     version = task.draft.version or getattr(runtime_context, "runtime_cache", {}).get("resolved_runtime_version", "")
     report_path = None

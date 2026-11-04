@@ -2,17 +2,27 @@
 
 from __future__ import annotations
 
+import multiprocessing as mp
+import os
 from dataclasses import replace
 from queue import Empty
+from types import SimpleNamespace
 
-from lol_audio_unpack.app.results import RunResult, StageResult
+import pytest
+from loguru import logger
+
+from lol_audio_unpack.app.results import ResultStatus, RunResult, StageResult
+from lol_audio_unpack.gui.service import execution_process_worker as process_worker
 from lol_audio_unpack.gui.service.execution_process_worker import ExecutionProcessWorker
 from lol_audio_unpack.gui.task_models import (
+    AppContextInputSnapshot,
     ExecutionTaskDraft,
+    ExecutionTaskParamsSnapshot,
     ExecutionTaskProgress,
     ExecutionTaskResult,
     QueuedExecutionTask,
 )
+from lol_audio_unpack.utils.logging import LoggingConfiguration, log_paths
 
 
 class _FakeQueue:
@@ -77,6 +87,10 @@ class _FakeContext:
     def Queue(self) -> _FakeQueue:  # noqa: N802
         """返回预设事件队列。"""
         return self._queue
+
+    def Value(self, _typecode, value):  # noqa: N802
+        """为假进程提供与共享等级值一致的字段。"""
+        return SimpleNamespace(value=value)
 
     def Process(self, *, target, args):  # noqa: N802
         """返回预设进程对象，并记录入口。"""
@@ -176,3 +190,122 @@ def test_worker_exit_without_terminal_event_reports_unknown_scope(qtbot) -> None
     assert len(failures) == 1 and "完成范围未知" in failures[0]
     worker._pump_events()
     assert len(failures) == 1
+
+
+def test_spawn_task_logs_reach_parent_before_result(qtbot, tmp_path, monkeypatch) -> None:
+    """真实 spawn 中的诊断和异常须保留来源，并接受各输出端等级过滤。"""
+    task = replace(
+        _build_task(),
+        draft=ExecutionTaskDraft(
+            "test",
+            "invalid source",
+            context_input=AppContextInputSnapshot(
+                (
+                    ("GAME_PATH", str(tmp_path / "missing-game")),
+                    ("OUTPUT_PATH", str(tmp_path / "output")),
+                    ("GAME_REGION", "en_US"),
+                )
+            ),
+            task_params=ExecutionTaskParamsSnapshot(run_extract=True, run_mapping=False),
+        ),
+    )
+    monkeypatch.setattr(LoggingConfiguration, "log_level", logger.level("DEBUG").no)
+    monkeypatch.setattr(LoggingConfiguration, "paths", ())
+    monkeypatch.setattr(LoggingConfiguration, "path_patterns", ())
+    logger.enable("lol_audio_unpack")
+    log_paths(tmp_path / "missing-game", tmp_path / "output")
+    records = []
+    visible = []
+    debug_sink = logger.add(lambda message: records.append(message.record.copy()), level="DEBUG")
+    info_sink = logger.add(lambda message: visible.append(message.record.copy()), level="INFO")
+    worker = ExecutionProcessWorker(task)
+    results = []
+    failures = []
+    logs_at_result = []
+    worker.signals.finished.connect(lambda result: (results.append(result), logs_at_result.append(len(records))))
+    worker.signals.failed.connect(failures.append)
+    try:
+        worker.start()
+        qtbot.waitUntil(lambda: bool(results or failures), timeout=20000)
+        assert worker.wait(5000)
+    finally:
+        if worker.isRunning():
+            worker.terminate()
+        logger.remove(debug_sink)
+        logger.remove(info_sink)
+
+    assert not failures
+    assert results[0].run_result.status is ResultStatus.FAILED
+    child = [record for record in records if record["process"].id != os.getpid()]
+    assert child and len(child) == len(records) == logs_at_result[0]
+    assert len({record["message"] for record in child}) == len(child)
+    assert any(record["level"].name == "DEBUG" for record in child)
+    assert any(record["level"].name == "ERROR" for record in child)
+    assert all(record["level"].no >= logger.level("INFO").no for record in visible)
+    assert all(record["extra"]["operation_id"] == task.draft.operation_id for record in child)
+    assert all(record["function"] != "_pump_events" for record in child)
+    assert all(str(tmp_path / "missing-game") not in record["message"] for record in child)
+    assert any("AppContextValidationError" in record["message"] for record in child)
+
+
+def _run_log_switch(task, event_queue, log_level, ready, resume):
+    """用进程事件在两组真实日志之间留出设置切换点。"""
+
+    def run(_task, _signals):
+        logger.trace("切换前 TRACE")
+        ready.set()
+        if not resume.wait(10):
+            raise TimeoutError("未收到日志等级切换后的继续事件")
+        logger.trace("切换后 TRACE")
+        logger.debug("切换后 DEBUG")
+        logger.info("切换后 INFO")
+        return ExecutionTaskResult(
+            completed_steps=(),
+            summary="日志切换完成",
+            duration_seconds=0,
+            run_result=RunResult((StageResult("extract"),)),
+        )
+
+    process_worker.run_execution_task = run
+    process_worker._run_task_process(task, event_queue, log_level)
+
+
+@pytest.mark.parametrize(("initial_level", "next_level"), [(10, 5), (5, 20)])
+def test_running_process_applies_log_level_changes(qtbot, monkeypatch, initial_level, next_level):
+    """真实子进程随运行时设置展开或收起日志细节，过滤发生在采集端。"""
+    context = mp.get_context("spawn")
+    ready, resume = context.Event(), context.Event()
+
+    def create_process(*, target, args):
+        return context.Process(target=_run_log_switch, args=(*args, ready, resume))
+
+    monkeypatch.setattr(LoggingConfiguration, "log_level", initial_level)
+    logger.enable("lol_audio_unpack")
+    records = []
+    sink = logger.add(lambda message: records.append(message.record.copy()), level="TRACE")
+    worker = ExecutionProcessWorker(
+        _build_task(),
+        mp_context=SimpleNamespace(Queue=context.Queue, Value=context.Value, Process=create_process),
+    )
+    results, failures = [], []
+    worker.signals.finished.connect(results.append)
+    worker.signals.failed.connect(failures.append)
+    try:
+        worker.start()
+        qtbot.waitUntil(ready.is_set, timeout=20000)
+        worker.set_log_level(next_level)
+        resume.set()
+        qtbot.waitUntil(lambda: bool(results or failures), timeout=20000)
+        assert worker.wait(5000)
+    finally:
+        resume.set()
+        if worker.isRunning():
+            worker.terminate()
+        logger.remove(sink)
+
+    assert not failures and results[0].run_result.status is ResultStatus.SUCCESS
+    messages = {record["message"] for record in records if record["process"].id != os.getpid()}
+    assert ("切换前 TRACE" in messages) == (initial_level == logger.level("TRACE").no)
+    assert ("切换后 TRACE" in messages) == (next_level == logger.level("TRACE").no)
+    assert ("切换后 DEBUG" in messages) == (next_level <= logger.level("DEBUG").no)
+    assert "切换后 INFO" in messages

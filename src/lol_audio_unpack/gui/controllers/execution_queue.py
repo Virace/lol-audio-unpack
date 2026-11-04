@@ -153,6 +153,11 @@ class ExecutionQueueController(QObject):
         """返回当前是否存在运行中的任务。"""
         return self._active_task_id is not None
 
+    def set_log_level(self, level: int) -> None:
+        """把当前采集等级同步给正在运行的任务进程。"""
+        if self._active_worker is not None:
+            self._active_worker.set_log_level(level)
+
     def has_active_background_work(self) -> bool:
         """返回执行中心是否仍持有运行中的后台任务。"""
         return bool(self._active_task_id is not None or self._active_worker is not None)
@@ -195,9 +200,9 @@ class ExecutionQueueController(QObject):
         )
         row_text = build_row_text(queued_task)
 
-        self.log_requested.emit(GuiLogMessage(level="info", message=f"[队列] {row_text}"))
         started_task = self.start_next_waiting_task()
         if started_task is None:
+            self.log_requested.emit(GuiLogMessage(level="info", message=f"[队列] {row_text}"))
             self.progress_display_requested.emit(
                 QueueProgressUpdate(
                     note_text="0% · 当前任务等待启动。",
@@ -243,9 +248,6 @@ class ExecutionQueueController(QObject):
             self._active_task_id = updated_task.task_id
             self.task_running_changed.emit(True)
             self.task_queue_busy_changed.emit(self.has_incomplete_tasks())
-            self.log_requested.emit(
-                GuiLogMessage(level="info", message=f"[队列] 已自动开始任务：{updated_task.summary}")
-            )
             self.progress_display_requested.emit(
                 QueueProgressUpdate(
                     note_text="当前进度：准备中 · 等待后台线程启动。",

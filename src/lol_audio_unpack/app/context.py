@@ -13,6 +13,7 @@ from lol_audio_unpack.config import (
     SUPPORTED_SETTING_KEYS,
     SettingKey,
 )
+from lol_audio_unpack.utils.game_layout import CHAMPIONS_DIR, MAPS_DIR, resolve_layout
 from lol_audio_unpack.utils.runtime_paths import (
     detect_runtime_paths,
     get_default_output_root,
@@ -84,13 +85,11 @@ def _build_settings(
                 logger.warning(f"忽略未知配置项: {key}")
                 continue
             if value is None:
-                logger.debug(f"忽略空的配置项: {key}=None")
                 continue
             if isinstance(value, str) and not value.strip():
                 if key in (SettingKey.EXCLUDE_TYPE, SettingKey.GAME_REGION):
                     merged[key] = ""
                     continue
-                logger.debug(f"忽略空白配置项: {key}")
                 continue
             merged[key] = value
 
@@ -164,9 +163,9 @@ def _build_paths(app_config: AppConfig) -> AppPaths:
         report_path=report_path,
         manifest_path=manifest_path,
         local_version_file=output_path / "game_version",
-        game_champion_path=game_path / "Game" / "DATA" / "FINAL" / "Champions",
-        game_maps_path=game_path / "Game" / "DATA" / "FINAL" / "Maps" / "Shipping",
-        game_lcu_path=game_path / "LeagueClient" / "Plugins" / "rcp-be-lol-game-data",
+        game_champion_path=game_path / CHAMPIONS_DIR,
+        game_maps_path=game_path / MAPS_DIR,
+        game_lcu_path=resolve_layout(game_path).lcu_path,
     )
 
 

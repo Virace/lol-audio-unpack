@@ -80,10 +80,9 @@ class MapBinProcessor:
         """输出简单的批量处理进度日志。"""
         logger.info(f"{stage_name}进度 {index}/{total}: {entity_id}")
 
-    @performance_monitor(level="DEBUG")
+    @performance_monitor(level="TRACE")
     def _update_maps(self, data: dict) -> tuple[UpdateEntityResult, ...]:
         """按地图 ID 更新 banks/events，并返回逐实体结果。"""
-        logger.info("开始处理地图音频数据...")
         self.map_banks_dir.mkdir(parents=True, exist_ok=True)
         self.map_events_dir.mkdir(parents=True, exist_ok=True)
 
@@ -158,8 +157,6 @@ class MapBinProcessor:
                 failed_count,
                 partial_count,
             )
-        else:
-            logger.success(f"地图Banks数据更新完成，共处理 {total_maps} 个地图")
         return tuple(results)
 
     def _emit_progress(

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lol_audio_unpack.utils.game_layout import GAME_METADATA, LCU_EXE, resolve_layout
 from lol_audio_unpack.utils.versioning import extract_windows_file_version, normalize_patch_version
 
 if TYPE_CHECKING:
@@ -26,7 +27,7 @@ def get_game_version(game_path: Path) -> str:
     Raises:
         FileNotFoundError: 当缺少 `content-metadata.json` 时抛出。
     """
-    meta = game_path / "Game" / "content-metadata.json"
+    meta = game_path / GAME_METADATA
     if not meta.exists():
         raise FileNotFoundError("content-metadata.json 文件不存在，无法判断版本信息")
 
@@ -45,7 +46,7 @@ def get_lcu_version(game_path: Path) -> str | None:
     Returns:
         若存在且成功解析，返回 ``major.minor`` 形式的版本号；否则返回 ``None``。
     """
-    exe_path = game_path / "LeagueClient" / "LeagueClient.exe"
+    exe_path = resolve_layout(game_path).client_root / LCU_EXE
     if not exe_path.is_file():
         return None
 
@@ -70,7 +71,6 @@ def validate_install_version(game_path: Path, game_version: str) -> None:
         return
 
     if lcu_version == game_version:
-        logger.debug(f"本地 GAME / LCU 主版本一致: {game_version}")
         return
 
     logger.warning(

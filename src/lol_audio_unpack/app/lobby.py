@@ -3,7 +3,8 @@
 from loguru import logger
 
 from lol_audio_unpack.manager.data_updater import DataUpdater
-from lol_audio_unpack.manager.lobby import LOBBY_FILES, find_lobby_source
+from lol_audio_unpack.manager.files import read_data
+from lol_audio_unpack.manager.lobby import LOBBY_FILES, find_lobby_file, find_lobby_source
 from lol_audio_unpack.runtime.library import Library
 from lol_audio_unpack.runtime.library.types import normalize_region
 
@@ -38,17 +39,27 @@ def repair_lobby(ctx: AppContext) -> None:
             if current:
                 DataUpdater(ctx).ensure_lobby_audio(current)
             added = missing = 0
+            champions_by_version = {}
             for patch, key, target in pending:
                 paths = []
                 manifest = root / "manifest" / patch / region
                 for category, filename in LOBBY_FILES.items():
                     path = target / filename
                     if not path.is_file():
-                        source = find_lobby_source(manifest, region, key, category)
+                        source = find_lobby_file(manifest, region, key, category)
+                        if source is None:
+                            # 多个共享英雄使用同一版本名单，只在需要关联查询时读取一次。
+                            if patch not in champions_by_version:
+                                champions_by_version[patch] = read_data(manifest / "data").get("champions", {})
+                            source = find_lobby_source(
+                                manifest, region, key, category, champions=champions_by_version[patch]
+                            )
                         if source is None:
                             missing += 1
                             continue
                         writer.link_file(source, path.relative_to(root).as_posix())
+                        if source.stem != key:
+                            logger.debug("已有英雄大厅音频复用原英雄：{} → {}，{}", key, source.stem, category)
                         added += 1
                     paths.append(path)
                 if paths:

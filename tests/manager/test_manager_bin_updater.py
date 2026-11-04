@@ -315,7 +315,7 @@ def test_update_preserves_explicit_map_scope(tmp_path, monkeypatch, selected, ex
 
 
 def test_update_logs_stage_start_and_summary_for_targeted_mode(tmp_path, monkeypatch):
-    """验证 BinUpdater 顶层会输出精确模式开始和完成摘要。"""
+    """内部更新保持安静，处理结果交由应用层统一播报。"""
     updater = m_bin_updater.BinUpdater.__new__(m_bin_updater.BinUpdater)
     updater.ctx = SimpleNamespace(config=SimpleNamespace(dev_mode=False), runtime_cache={}, paths=SimpleNamespace())
     updater.force_update = False
@@ -336,7 +336,7 @@ def test_update_logs_stage_start_and_summary_for_targeted_mode(tmp_path, monkeyp
     )
 
     info_messages: list[str] = []
-    success_messages: list[str] = []
+    debug_messages: list[str] = []
 
     monkeypatch.setattr(
         m_bin_updater,
@@ -352,13 +352,13 @@ def test_update_logs_stage_start_and_summary_for_targeted_mode(tmp_path, monkeyp
         "logger",
         SimpleNamespace(
             info=lambda message: info_messages.append(str(message)),
-            success=lambda message: success_messages.append(str(message)),
+            debug=lambda message: debug_messages.append(str(message)),
         ),
     )
     updater.update(target="all", champion_ids=["1"], map_ids=["11"])
 
-    assert info_messages == ["开始更新 BIN 数据（精确模式）：英雄 1 个，地图 2 个，事件处理=开启"]
-    assert success_messages == ["BinUpdater 更新完成（精确模式）：英雄 1 个，地图 2 个"]
+    assert info_messages == []
+    assert debug_messages == []
 
 
 def test_bin_updater_completion_does_not_report_partial_as_success(monkeypatch) -> None:
@@ -551,7 +551,7 @@ def test_update_champions_logs_simple_progress_messages(tmp_path, monkeypatch):
     assert processed_ids == ["1", "2"]
     assert "处理英雄进度 1/2: 1" in info_messages
     assert "处理英雄进度 2/2: 2" in info_messages
-    assert success_messages == ["英雄Banks数据更新完成，共处理 2 个英雄"]
+    assert success_messages == []
     assert [(event.event, event.current, event.total) for event in progress_events] == [
         ("started", 0, 2),
         ("advanced", 1, 2),
@@ -603,7 +603,7 @@ def test_update_maps_logs_simple_progress_messages(tmp_path, monkeypatch):
     assert processed_ids == ["11", "12"]
     assert "处理地图进度 1/2: 11" in info_messages
     assert "处理地图进度 2/2: 12" in info_messages
-    assert success_messages == ["地图Banks数据更新完成，共处理 2 个地图"]
+    assert success_messages == []
     assert [(event.event, event.current, event.total) for event in progress_events] == [
         ("started", 0, 2),
         ("advanced", 1, 2),

@@ -7,6 +7,9 @@ import pytest
 from loguru import logger
 
 from lol_audio_unpack.app.types import AppConfig, AppContext, AppPaths
+from lol_audio_unpack.manager import lobby
+from lol_audio_unpack.manager.files import write_data
+from lol_audio_unpack.manager.lobby import find_lobby_source
 from lol_audio_unpack.model import AudioBank, AudioEntityData
 from lol_audio_unpack.model import binding as resource_binding
 from lol_audio_unpack.unpack import entity as unpack_entity
@@ -34,7 +37,9 @@ def test_english_voice_uses_default_namespace(tmp_path, region):
     source.parent.mkdir(parents=True)
     source.write_bytes(b"english")
     assert (
-        unpack_lobby_audio.find_lobby_audio_source(SimpleNamespace(version="16.18"), "1", "champion-choose-vo", ctx=ctx)
+        unpack_lobby_audio.find_lobby_audio_source(
+            SimpleNamespace(version="16.18", data={"champions": {}}), "1", "champion-choose-vo", ctx=ctx
+        )
         == source
     )
 
@@ -47,11 +52,60 @@ def test_localized_voice_never_falls_back_to_default(tmp_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"default audio")
     ctx = make_context(tmp_path, paths=SimpleNamespace(manifest_path=tmp_path), game_region="ja_JP")
-    reader = SimpleNamespace(version="16.18")
+    reader = SimpleNamespace(version="16.18", data={"champions": {}})
     assert unpack_lobby_audio.find_lobby_audio_source(reader, "1", "champion-ban-vo", ctx=ctx) is None
     assert unpack_lobby_audio.find_lobby_audio_source(reader, "1", "champion-sfx-audios", ctx=ctx) == (
         lobby / "default" / "champion-sfx-audios" / "1.ogg"
     )
+
+
+@pytest.mark.parametrize("own_present", [False, True])
+def test_lobby_uses_prime_voice_until_own_resource_exists(tmp_path, own_present):
+    """Jade 沿声明复用原英雄语音，独立文件存在时优先使用自身文件。"""
+    write_data({"champions": {"60001": {"relatedPrimeItemId": 1}}}, tmp_path / "data")
+    source_dir = tmp_path / "lobby/zh_CN/champion-choose-vo"
+    source_dir.mkdir(parents=True)
+    prime = source_dir / "1.ogg"
+    prime.write_bytes(b"prime voice")
+    own = source_dir / "60001.ogg"
+    if own_present:
+        own.write_bytes(b"own voice")
+
+    assert find_lobby_source(tmp_path, "zh_CN", "60001", "champion-choose-vo") == (own if own_present else prime)
+    assert not own.exists() or own.read_bytes() == b"own voice"
+
+
+def test_old_jade_catalog_reuses_prime_within_requested_language(tmp_path):
+    """旧目录保留 Jade 身份时仍可复用原英雄；语音保持当前语言归属。"""
+    write_data({"champions": {"60001": {"id": 60001, "alias": "Jade_Annie"}}}, tmp_path / "data")
+    source = tmp_path / "lobby/default/champion-ban-vo/1.ogg"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"english prime voice")
+
+    assert find_lobby_source(tmp_path, "zh_CN", "60001", "champion-ban-vo") is None
+    assert find_lobby_source(tmp_path, "en_US", "60001", "champion-ban-vo") == source
+
+
+def test_lobby_lookup_reuses_reader_champions(tmp_path, monkeypatch):
+    """共享来源查找复用已加载的英雄表，批量查找不再读取元数据文件。"""
+    ctx = make_context(tmp_path, game_region="en_US")
+    reader = SimpleNamespace(version="16.22", data={"champions": {"60001": {"relatedPrimeItemId": 1}}})
+    manifest = ctx.version_path("manifest", reader.version)
+    write_data(reader.data, manifest / "data")
+    source = manifest / "lobby/default/champion-choose-vo/1.ogg"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"prime voice")
+    reads = []
+    original = lobby.read_data
+
+    def count_read(path):
+        reads.append(path)
+        return original(path)
+
+    monkeypatch.setattr(lobby, "read_data", count_read)
+    for _ in range(2):
+        assert unpack_lobby_audio.find_lobby_audio_source(reader, "60001", "champion-choose-vo", ctx=ctx) == source
+    assert reads == []
 
 
 @pytest.mark.parametrize("enabled", [True, False])
@@ -105,7 +159,7 @@ def test_attach_lobby_audio_links_and_reports_persisted_files(tmp_path, monkeypa
         wad_root="Game/DATA/FINAL/Champions/Annie.wad.client",
         wad_language=None,
     )
-    reader = SimpleNamespace(version=version)
+    reader = SimpleNamespace(version=version, data={"champions": {}})
 
     entity_folder = format_entity_folder_name("1", "annie", "安妮", "黑暗之女")
     target_dir = audio_root / version / "zh_CN" / "champions" / entity_folder / "lobby"
@@ -175,7 +229,7 @@ def test_attach_lobby_audio_writes_sfx_audio_from_default_fallback(tmp_path, mon
         wad_root="Game/DATA/FINAL/Champions/Annie.wad.client",
         wad_language=None,
     )
-    reader = SimpleNamespace(version=version)
+    reader = SimpleNamespace(version=version, data={"champions": {}})
 
     unpack_lobby_audio.attach_lobby_audio(entity_data, reader, ctx=ctx)
 
@@ -230,7 +284,7 @@ def test_attach_lobby_audio_writes_all_lobby_audio_into_single_lobby_dir_when_gr
         wad_root="Game/DATA/FINAL/Champions/Annie.wad.client",
         wad_language=None,
     )
-    reader = SimpleNamespace(version=version)
+    reader = SimpleNamespace(version=version, data={"champions": {}})
 
     unpack_lobby_audio.attach_lobby_audio(entity_data, reader, ctx=ctx)
 
