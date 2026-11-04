@@ -17,7 +17,7 @@ from .utils.versioning import resolve_runtime_version
 if TYPE_CHECKING:
     from .app import AppContext
 
-_STATIC_VERSION = "3.11.0"
+_STATIC_VERSION = "3.11.1"
 __version__ = resolve_runtime_version(Path(__file__).resolve().parents[2], _STATIC_VERSION)
 
 logger.disable("lol_audio_unpack")
